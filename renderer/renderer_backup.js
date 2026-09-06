@@ -222,8 +222,6 @@ const elEmpty = $('empty-state');
 const elAttach = $('attach-btn');
 const elFileInput = $('file-input');
 const elAttachments = $('attachments');
-const elProjectsScroll = $('projects-scroll');
-const state_projCollapsed = new Set();
 
 /* ---------- helpers ---------- */
 
@@ -658,33 +656,14 @@ function renderWorkspaces() {
 
 /* ---------- проекты (2.0): дерево менеджер → работники ---------- */
 
-async function renderProjects() {
-  if (!elProjectsScroll) return;
-  elProjectsScroll.innerHTML = '';
-  let projects = [];
-  try { projects = await api.projectList(); } catch (_) { projects = []; }
-
-  if (!projects.length) {
-    const e = document.createElement('div');
-    e.className = 'proj-empty';
-    e.textContent = i18nT('projectsPlaceholder');
-    elProjectsScroll.appendChild(e);
-    return;
-  }
 
   const activeId = state.activeChatId;
   const activeWsId = state.activeWorkspace ? state.activeWorkspace.id : null;
 
-  for (const { workspaceId, project, workers } of projects) {
-    const collapsed = state_projCollapsed.has(project.id);
-    const isActive = project.id === activeId && workspaceId === activeWsId;
-    const proj = document.createElement('div');
     proj.className = 'proj-item' + (isActive ? ' active' : '');
     proj.dataset.chatId = project.id;
     proj.dataset.wsId = workspaceId;
 
-    const statusCls = (project.status || 'planning');
-    const statusLabel = i18nT('projectStatus' + statusCls.charAt(0).toUpperCase() + statusCls.slice(1)) || statusCls;
 
     proj.innerHTML = `
       <div class="proj-head">
@@ -692,9 +671,9 @@ async function renderProjects() {
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <span class="proj-ic">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </span>
-        <span class="proj-name">${escapeHtml(project.title || 'Проект')}</span>
+        <span class="proj-name">${escapeHtml(project.title || 'Менеджер')}</span>
         <span class="proj-badge ${statusCls}">${escapeHtml(statusLabel)}</span>
         <button class="proj-del" title="${i18nT('deleteTitle')}">✕</button>
       </div>
@@ -702,15 +681,11 @@ async function renderProjects() {
       <div class="proj-workers ${collapsed ? 'collapsed' : ''}"></div>
     `;
 
-    const chevBtn = proj.querySelector('.proj-chev');
     chevBtn.onclick = (e) => {
       e.stopPropagation();
-      if (state_projCollapsed.has(project.id)) state_projCollapsed.delete(project.id);
-      else state_projCollapsed.add(project.id);
-      renderProjects();
+      ;
     };
 
-    const delBtn = proj.querySelector('.proj-del');
     delBtn.onclick = async (e) => {
       e.stopPropagation();
       if (state.settings && state.settings.confirmDelete !== false) {
@@ -723,13 +698,12 @@ async function renderProjects() {
         if (firstChat) openChat(workspaceId, firstChat.id);
         else newChat();
       }
-      renderProjects();
+      ;
       renderWorkspaces();
     };
 
     proj.onclick = () => openChat(workspaceId, project.id);
 
-    const workersEl = proj.querySelector('.proj-workers');
     for (const w of workers) {
       const wItem = document.createElement('div');
       const wActive = w.id === activeId && workspaceId === activeWsId;
@@ -737,10 +711,10 @@ async function renderProjects() {
       wItem.dataset.chatId = w.id;
       wItem.dataset.wsId = workspaceId;
       const wStatusCls = w.status || 'idle';
-      const wStatusLabel = i18nT('projectStatus' + wStatusCls.charAt(0).toUpperCase() + wStatusCls.slice(1)) || wStatusCls;
       const preview = (w.result || w.task || '').replace(/\s+/g, ' ').trim().slice(0, 60);
       wItem.innerHTML = `
         <span class="dot ${wStatusCls}"></span>
+        <span class="proj-worker-icon">👨‍💻</span>
         <span class="proj-worker-name">${escapeHtml(w.title || 'Работник')}</span>
         <span class="proj-worker-status">${escapeHtml(wStatusLabel)}</span>
       `;
@@ -753,25 +727,7 @@ async function renderProjects() {
   }
 }
 
-async function createProjectFlow() {
-  try {
-    const name = await uiPrompt(i18nT('projectCreateName'), '');
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    const goal = await uiPrompt(i18nT('projectCreateGoal'), '');
-    if (goal === null) return;
-    // если нет активного воркспейса — берём первый попавшийся (включая «Без проекта»)
-    const wsId = (state.activeWorkspace && state.activeWorkspace.id) || (state.workspaces.length && state.workspaces[0].id) || null;
-    if (!wsId) return;
-    const project = await api.projectCreate({ workspaceId: wsId, name: trimmed, goal: goal || '' });
-    if (project && project.id) {
-      await loadWorkspaces();
-      renderProjects();
-      openChat(wsId, project.id);
-    }
-  } catch (err) {
-    console.error('createProjectFlow failed:', err);
+    console.error(' failed:', err);
   }
 }
 
@@ -1100,11 +1056,16 @@ function clearMessages() {
   elEmpty.classList.remove('hidden');
 }
 
-function buildSystemMessage(memoryText) {
+function buildSystemMessage(memoryText, role = 'user') {
+  console.log('[RENDERER] buildSystemMessage вызывается с role:', role);
   let sys = state.settings.systemPrompt || '';
+  
+  // Всегда обычный промпт - система проектов удалена
   if (!sys.trim()) {
-    sys = 'Ты — полезный ассистент. Отвечай кратко и по делу, помогай пользователю с задачами.';
+    sys = 'Ты — Claude, созданный компанией Anthropic. Твоё имя — Claude, и так ты и представляешься.\n';
+    sys += 'Никогда не называй себя кем-то другим (например Kiro или другой моделью, имя которой подставляет шлюз).\n\n';
   }
+  
   const lang = state.settings.language || 'ru';
   const langRule = {
     ru: 'Отвечай всегда на русском языке.',
@@ -1113,20 +1074,60 @@ function buildSystemMessage(memoryText) {
     uk: 'Відповідай завжди українською мовою.'
   }[lang];
   if (langRule) sys += '\n\n' + langRule;
+  
   sys += '\n\nВАЖНО: если пользователь прикрепил картинку — описывай ТОЛЬКО то, что реально видишь на ней. НЕ выдумывай детали, которых нет. Если изображение нечёткое/маленькое или ты не уверен — прямо скажи об этом и опиши только очевидное. Никогда не описывай окна, ошибки или интерфейсы, если их нет на скриншоте.';
+  
   if (state.settings.identityOverride && state.settings.publicName) {
     sys += `\n\nТы — ${state.settings.publicName}. Так и представляйся. Используй имя «${state.settings.publicName}».`;
   }
+  
+  if (state.activeWorkspace) {
+    sys += `\n\nРабочая папка: ${state.activeWorkspace.path}. Все пути в инструментах — относительные к ней.`;
+  }
+  
+  if (memoryText) {
+    sys += '\n\n=== Память (что мы уже обсуждали) ===\nСписок «вопрос → ответ» из прошлых диалогов. Используй это, чтобы не переспрашивать и продолжать с учётом уже принятых решений. Если вопрос уже разобран — кратко напомни, что решили ранее.\n' + memoryText;
+  }
+  
+  return sys;
+} else {
+    // Обычный промпт для пользователя
+    if (!sys.trim()) {
+      sys = 'Ты — Claude, созданный компанией Anthropic. Твоё имя — Claude, и так ты и представляешься.\n';
+      sys += 'Никогда не называй себя кем-то другим (например Kiro или другой моделью, имя которой подставляет шлюз).\n\n';
+    }
+  }
+  
+  const lang = state.settings.language || 'ru';
+  const langRule = {
+    ru: 'Отвечай всегда на русском языке.',
+    en: 'Always respond in English.',
+    kk: 'Әрқашан қазақ тілінде жауап бер.',
+    uk: 'Відповідай завжди українською мовою.'
+  }[lang];
+  if (langRule) sys += '\n\n' + langRule;
+  
+  sys += '\n\nВАЖНО: если пользователь прикрепил картинку — описывай ТОЛЬКО то, что реально видишь на ней. НЕ выдумывай детали, которых нет. Если изображение нечёткое/маленькое или ты не уверен — прямо скажи об этом и опиши только очевидное. Никогда не описывай окна, ошибки или интерфейсы, если их нет на скриншоте.';
+  
+  if (state.settings.identityOverride && state.settings.publicName) {
+    sys += `\n\nТы — ${state.settings.publicName}. Так и представляйся. Используй имя «${state.settings.publicName}».`;
+  }
+  
   if (state.activeWorkspace) {
     sys += `\n\nРабочая папка проекта: ${state.activeWorkspace.path}. Все пути в инструментах — относительные к ней.`;
   }
+  
   if (memoryText) {
     sys += '\n\n=== Память проекта (что мы уже обсуждали) ===\nСписок «вопрос → ответ» из прошлых диалогов. Используй это, чтобы не переспрашивать и продолжать с учётом уже принятых решений. Если вопрос уже разобран — кратко напомни, что решили ранее.\n' + memoryText;
   }
+  
   sys += '\n\nСегодня: ' + new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) + '.';
+  
   const agentOn = !!(state.settings && state.settings.agentMode);
   sys += '\n\nУ тебя ' + (agentOn ? 'есть доступ к инструментам' : 'нет доступа к инструментам') + ' (bash, файлы, интернет).';
+  
   if (state.settings && state.settings.webTools === false) sys += ' Веб-инструменты (поиск/чтение страниц) отключены.';
+  
   return sys;
 }
 
@@ -1364,7 +1365,19 @@ async function send() {
       memoryText = formatMemory(await api.memoryRead(state.activeWorkspace.id));
     } catch (_) { memoryText = ''; }
   }
-  const systemMsg = buildSystemMessage(memoryText);
+  // Определяем роль для системного промпта
+  const activeChat = state.activeWorkspace && state.activeChatId
+    ? (state.activeWorkspace.chats || []).find((c) => c.id === state.activeChatId)
+    : null;
+  console.log('[RENDERER] Активный чат для промпта:', {
+    chatId: state.activeChatId,
+    chat: activeChat ? { id: activeChat.id, title: activeChat.title, kind: activeChat.kind } : null,
+    workspaceId: state.activeWorkspace ? state.activeWorkspace.id : null
+  });
+    : activeChat && activeChat.kind === 'worker' ? 'worker'
+    : 'user';
+  console.log('[RENDERER] Определённая роль для системного промпта:', systemRole);
+  const systemMsg = buildSystemMessage(memoryText, systemRole);
 
   // ---- авто-сжатие контекста: если чат заполнил >80% бюджета, старую часть
   // превращаем в резюме, чтобы модель не переваривала простыню и быстрее стартовала
@@ -2481,9 +2494,8 @@ async function init() {
   $('settings-skill-add').addEventListener('click', createSkill);
   $('mcp-add').addEventListener('click', addMcpServer);
 
-  const addProjBtn = $('add-project-btn');
-  if (addProjBtn) addProjBtn.addEventListener('click', createProjectFlow);
-  api.onProjectChanged(() => { renderProjects(); renderWorkspaces(); });
+  if (addProjBtn) 
+  (() => { ; renderWorkspaces(); });
 
   setupApproval();
   setupPoll();
@@ -2491,7 +2503,7 @@ async function init() {
   setStreaming(false);
 
   await Promise.all([loadWorkspaces(), loadModels(), loadSkills()]);
-  renderProjects();
+  ;
 }
 
 async function toggleTheme() {
@@ -3032,3 +3044,4 @@ if (originalInput) {
     }
   });
 }
+

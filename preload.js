@@ -33,6 +33,18 @@ contextBridge.exposeInMainWorld('infinity', {
   workspaceDeleteChat: (payload) => ipcRenderer.invoke('workspace:deleteChat', payload),
   workspaceRenameChat: (payload) => ipcRenderer.invoke('workspace:renameChat', payload),
 
+  // memory (память проекта)
+  memoryRead: (workspaceId) => ipcRenderer.invoke('memory:read', { workspaceId }),
+  memoryAppend: (payload) => ipcRenderer.invoke('memory:append', payload),
+  summarizeContext: (payload) => ipcRenderer.invoke('context:summarize', payload),
+
+  // projects (2.0)
+  projectList: () => ipcRenderer.invoke('project:list'),
+  projectCreate: (payload) => ipcRenderer.invoke('project:create', payload),
+  projectDelete: (payload) => ipcRenderer.invoke('project:delete', payload),
+  projectGetChat: (payload) => ipcRenderer.invoke('project:getChat', payload),
+  onProjectChanged: (cb) => on('project:changed', cb),
+
   // skills
   listSkills: () => ipcRenderer.invoke('skills:list'),
   readSkillBody: (id) => ipcRenderer.invoke('skills:readBody', id),

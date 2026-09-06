@@ -85,6 +85,28 @@ async function streamChat({
               toolCallsByIdx.set(tc.index, slot);
             }
             if (tc.id) slot.id = tc.id;
+            
+            // Обработка различных форматов tool_calls
+            if (tc.function) {
+              if (tc.function.name) slot.name = tc.function.name;
+              if (tc.function.arguments) slot.arguments += tc.function.arguments;
+            } else if (tc.name) {
+              // Альтернативный формат: прямой name и arguments
+              slot.name = tc.name;
+              if (tc.arguments) slot.arguments += tc.arguments;
+            }
+          }
+        }
+        
+        // Также проверяем наличие tool_calls в корне choice (некоторые провайдеры так отправляют)
+        if (!Array.isArray(delta.tool_calls) && Array.isArray(choice.tool_calls)) {
+          for (const tc of choice.tool_calls) {
+            let slot = toolCallsByIdx.get(tc.index || 0);
+            if (!slot) {
+              slot = { id: tc.id || '', name: '', arguments: '' };
+              toolCallsByIdx.set(tc.index || 0, slot);
+            }
+            if (tc.id) slot.id = tc.id;
             if (tc.function) {
               if (tc.function.name) slot.name = tc.function.name;
               if (tc.function.arguments) slot.arguments += tc.function.arguments;

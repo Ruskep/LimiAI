@@ -1,7 +1,7 @@
 {
   "name": "infinity-claude-desktop",
   "productName": "InfinityClaude",
-  "version": "1.2.4",
+  "version": "1.9.0",
   "description": "Desktop Claude-style GUI chatting through OmniRoute free gateway",
   "main": "main.js",
   "scripts": {

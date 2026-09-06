@@ -137,7 +137,6 @@ function renameChat(workspaceId, chatId, title) {
   return ws.chats;
 }
 
-/* ---------- проекты (2.0): менеджер + работники ---------- */
 
 function getChat(workspaceId, chatId) {
   load();
@@ -148,7 +147,6 @@ function getChat(workspaceId, chatId) {
 
 // создать чат-менеджер проекта. Проект — это обычный чат со статусом kind='project';
 // он живёт в воркспейсе и хранит цель проекта.
-function createProject(workspaceId, name, goal) {
   const chat = {
     id: uniqueChatId(),
     title: String(name || '').trim() || 'Новый проект',
@@ -159,24 +157,14 @@ function createProject(workspaceId, name, goal) {
     messages: [],
     updatedAt: Date.now()
   };
+  console.log('[WORKSPACES] Создан объект проекта:', chat);
   saveChat(workspaceId, chat);
-  return getChat(workspaceId, chat.id);
+  const saved = getChat(workspaceId, chat.id);
+  console.log('[WORKSPACES] Сохранённый проект:', saved);
+  return saved;
 }
 
 // создать чат-работника под конкретным менеджером
-function createWorker(workspaceId, managerId, title, task) {
-  const chat = {
-    id: uniqueChatId(),
-    title: String(title || '').trim() || 'Новая задача',
-    manualTitle: true,
-    kind: 'worker',
-    managerId,
-    task: String(task || '').trim(),
-    status: 'idle', // idle | running | done | error
-    messages: [],
-    result: '',
-    updatedAt: Date.now()
-  };
   saveChat(workspaceId, chat);
   return getChat(workspaceId, chat.id);
 }
@@ -203,34 +191,12 @@ function appendChatMessages(workspaceId, chatId, msgs) {
   return chat;
 }
 
-function listWorkers(workspaceId, managerId) {
-  load();
-  const ws = wsCache.find((w) => w.id === workspaceId);
-  if (!ws) return [];
-  return ws.chats.filter((c) => c.kind === 'worker' && c.managerId === managerId);
-}
 
 // все проекты по всем воркспейсам (для раздела «Проекты»)
-function listProjects() {
-  load();
-  const out = [];
-  for (const ws of wsCache) {
-    for (const c of (ws.chats || [])) {
-      if (c.kind === 'project') out.push({ workspaceId: ws.id, project: c, workers: ws.chats.filter((w) => w.kind === 'worker' && w.managerId === c.id) });
-    }
-  }
   return out;
 }
 
 // удалить чат со всеми его работниками (если это менеджер)
-function deleteChatCascade(workspaceId, chatId) {
-  load();
-  const ws = wsCache.find((w) => w.id === workspaceId);
-  if (!ws) return [];
-  const chat = ws.chats.find((c) => c.id === chatId);
-  if (chat && chat.kind === 'project') {
-    ws.chats = ws.chats.filter((c) => !(c.managerId === chatId && c.kind === 'worker'));
-  }
   ws.chats = ws.chats.filter((c) => c.id !== chatId);
   save();
   return ws.chats;

@@ -14,14 +14,52 @@ function unescapeHtml(s) {
 }
 
 function mapToolName(raw) {
-  const key = String(raw || '').trim();
+  const key = String(raw || '').trim().toLowerCase();
   const map = {
-    bash: 'bash', shell: 'bash', terminal: 'bash', cmd: 'bash', powershell: 'bash', 'Bash': 'bash', 'Shell': 'bash',
-    read: 'read_file', read_file: 'read_file', Read: 'read_file', 'ReadFile': 'read_file',
-    write: 'write_file', write_file: 'write_file', Write: 'write_file', 'WriteFile': 'write_file',
-    edit: 'edit_file', edit_file: 'edit_file', Edit: 'edit_file', 'EditFile': 'edit_file', 'MultiEdit': 'edit_file',
-    delete: 'delete_file', delete_file: 'delete_file', Delete: 'delete_file', 'DeleteFile': 'delete_file', rm: 'delete_file', 'Rm': 'delete_file',
-    list_dir: 'list_dir', ls: 'list_dir', 'ListDir': 'list_dir', 'List': 'list_dir', 'LS': 'list_dir', list: 'list_dir', glob: 'list_dir', 'Glob': 'list_dir'
+    // bash/terminal commands
+    'bash': 'bash', 'shell': 'bash', 'terminal': 'bash', 'cmd': 'bash', 
+    'powershell': 'bash', 'command': 'bash', 'run': 'bash', 'execute': 'bash',
+    
+    // file operations
+    'read_file': 'read_file', 'readfile': 'read_file', 'read': 'read_file',
+    'readfile': 'read_file', 'openfile': 'read_file', 'cat': 'read_file',
+    
+    'write_file': 'write_file', 'writefile': 'write_file', 'write': 'write_file',
+    'createfile': 'write_file', 'savefile': 'write_file',
+    
+    'edit_file': 'edit_file', 'editfile': 'edit_file', 'edit': 'edit_file',
+    'updatefile': 'edit_file', 'modifyfile': 'edit_file', 'multiedit': 'edit_file',
+    'replace': 'edit_file',
+    
+    'delete_file': 'delete_file', 'deletefile': 'delete_file', 'delete': 'delete_file',
+    'removefile': 'delete_file', 'rm': 'delete_file', 'del': 'delete_file',
+    
+    'list_dir': 'list_dir', 'listdir': 'list_dir', 'list': 'list_dir',
+    'ls': 'list_dir', 'dir': 'list_dir', 'glob': 'list_dir', 'files': 'list_dir',
+    
+    // web operations
+    'web_search': 'web_search', 'websearch': 'web_search', 'search': 'web_search',
+    'internet_search': 'web_search', 'duckduckgo': 'web_search',
+    
+    'web_fetch': 'web_fetch', 'webfetch': 'web_fetch', 'fetch': 'web_fetch',
+    'read_url': 'web_fetch', 'scrape': 'web_fetch',
+    
+    // user interaction
+    'ask_user': 'ask_user', 'askuser': 'ask_user', 'poll': 'ask_user',
+    'question': 'ask_user', 'survey': 'ask_user',
+    
+    // manager tools
+    'project_status': 'project_status', 'projectstatus': 'project_status',
+    'status': 'project_status',
+    
+    'create_worker': 'create_worker', 'createworker': 'create_worker',
+    'new_worker': 'create_worker',
+    
+    'assign_task': 'assign_task', 'assigntask': 'assign_task',
+    'task': 'assign_task',
+    
+    'read_worker': 'read_worker', 'readworker': 'read_worker',
+    'worker_log': 'read_worker'
   };
   return map[key] || null;
 }
@@ -72,6 +110,35 @@ function parseTextToolCalls(text) {
     .replace(/\|>/g, '>')
     .replace(/\|\s*>/g, '>');
 
+  // Дополнительная нормализация: обработка различных форматов вызовов
+  // 1. Формат Anthropic: <tool_calls><invoke name="tool"><parameter name="param">value</parameter></invoke></tool_calls>
+  // 2. Формат OpenAI-style: {"name": "tool", "arguments": {"param": "value"}}
+  // 3. Простой формат: [TOOL: tool] {param: value}
+  
+  // Сначала пробуем парсить JSON-формат
+  let callsFromJson = [];
+  try {
+    // Ищем JSON-подобные структуры в тексте
+    const jsonRegex = /\{[\s\n]*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/g;
+    let jsonMatch;
+    while ((jsonMatch = jsonRegex.exec(t)) !== null) {
+      try {
+        const name = jsonMatch[1];
+        const args = JSON.parse(jsonMatch[2]);
+        if (name && args) {
+          const mappedName = mapToolName(name);
+          if (mappedName) {
+            callsFromJson.push({ name: mappedName, args: normalizeParams(mappedName, args) });
+          }
+        }
+      } catch (e) {
+        // Пропускаем некорректные JSON
+      }
+    }
+  } catch (e) {
+    // Игнорируем ошибки парсинга JSON
+  }
+
   // позиции открывающих <invoke ... name="X">
   const invokes = [];
   const invokeOpenRe = /<\s*invoke\s+name\s*=\s*["']?([^\s"'|>]+)["']?\s*(?:>|$)/gi;
@@ -79,6 +146,21 @@ function parseTextToolCalls(text) {
   while ((m = invokeOpenRe.exec(t)) !== null) {
     invokes.push({ name: m[1].trim(), index: m.index, rawEnd: m.index + m[0].length });
   }
+
+  // Если есть вызовы из JSON и нет XML-вызовов, используем JSON
+  if (callsFromJson.length > 0 && invokes.length === 0) {
+    // Найдем и удалим JSON вызовы из текста
+    const jsonCallRegex = /\{[\s\n]*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/g;
+    let cleanText = t.replace(jsonCallRegex, '').trim();
+    cleanText = cleanText
+      .replace(/^\s*[\r\n]+/, '')
+      .replace(/\s*$/, '')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    return { calls: callsFromJson, cleanText };
+  }
+
   if (!invokes.length) return { calls: [], cleanText: t.trim() };
 
   // разделим t на сегменты по открывающим тегам
@@ -111,6 +193,24 @@ function parseTextToolCalls(text) {
       let val = unescapeHtml(pm[2]).trim();
       val = val.replace(/<\s*\/?\s*(?:antml:)?(?:parameter|invoke|tool_calls|function_calls)\b[^>]*>/gi, ' ').trim();
       params[key] = val;
+    }
+
+    // также пробуем парсить параметры в виде JSON внутри invoke
+    const jsonInInvokeRegex = /<\s*invoke[^>]*>([\s\S]*?)<\s*\/\s*invoke\b/i;
+    const jsonMatch = body.match(jsonInInvokeRegex);
+    if (jsonMatch) {
+      const innerContent = jsonMatch[1];
+      // Ищем JSON внутри
+      const innerJsonRegex = /\{[\s\S]*?\}/g;
+      let innerJsonMatch;
+      while ((innerJsonMatch = innerJsonRegex.exec(innerContent)) !== null) {
+        try {
+          const jsonObj = JSON.parse(innerJsonMatch[0]);
+          Object.assign(params, jsonObj);
+        } catch (e) {
+          // Игнорируем некорректн��й JSON
+        }
+      }
     }
 
     // граница удаления блока: закрывающий тег после этого invoke, либо следующий invoke, либо конец
