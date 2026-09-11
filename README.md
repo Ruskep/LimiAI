@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="build/icon.png" width="128" height="128" alt="InfinityClaude logo" />
+  <img src="build/icon.png" width="128" height="128" alt="LimiAI logo" />
 </p>
 
-<h1 align="center">InfinityClaude</h1>
+<h1 align="center">LimiAI</h1>
 
 <p align="center">
   <strong>A desktop AI agent for working on real projects.</strong><br/>
@@ -21,7 +21,7 @@
 
 ## Table of contents
 
-1. [What is InfinityClaude](#what-is-infinityclaude)
+1. [What is LimiAI](#what-is-LimiAI)
 2. [Features](#features)
 3. [Requirements](#requirements)
 4. [Installation](#installation)
@@ -38,9 +38,9 @@
 
 ---
 
-## What is InfinityClaude
+## What is LimiAI
 
-InfinityClaude is a desktop chat UI built around **agents with real tools**. Instead of just replying, the model can inspect your project, edit files, execute commands, search the web, and hand work back to you with questions when it is stuck — then keep going until the job is done.
+LimiAI is a desktop chat UI built around **agents with real tools**. Instead of just replying, the model can inspect your project, edit files, execute commands, search the web, and hand work back to you with questions when it is stuck — then keep going until the job is done.
 
 It talks to models through **OmniRoute**, a free gateway that aggregates many OpenAI-compatible providers behind a single local API — no paid API keys required.
 
@@ -69,7 +69,7 @@ It talks to models through **OmniRoute**, a free gateway that aggregates many Op
 
 ### Installer build
 
-Download `InfinityClaude Setup 1.1.0.exe` from the [Releases](../../releases) page and run it. No extra runtime is required.
+Download `LimiAI Setup 1.1.0.exe` from the [Releases](../../releases) page and run it. No extra runtime is required.
 
 ### From source
 
@@ -81,7 +81,7 @@ npm start
 Build the installer:
 
 ```bash
-npm run dist        # creates release/InfinityClaude Setup *.exe
+npm run dist        # creates release/LimiAI Setup *.exe
 npm run dist:dir    # just the unpacked app in release/win-unpacked
 ```
 
@@ -96,7 +96,7 @@ npm run dist:dir    # just the unpacked app in release/win-unpacked
 
 ## OmniRoute: installing and setting up the gateway
 
-InfinityClaude does not talk to paid APIs directly — it goes through **OmniRoute**, a gateway that aggregates many providers into a single OpenAI-compatible API. Without a running OmniRoute, the chat won't respond.
+LimiAI does not talk to paid APIs directly — it goes through **OmniRoute**, a gateway that aggregates many providers into a single OpenAI-compatible API. Without a running OmniRoute, the chat won't respond.
 
 ### Install and start OmniRoute
 
@@ -105,21 +105,21 @@ npm install -g omniroute
 omniroute start
 ```
 
-It listens on `http://localhost:20128` by default — exactly what InfinityClaude uses out of the box.
+It listens on `http://localhost:20128` by default — exactly what LimiAI uses out of the box.
 
 ### Connect a model (OAuth account)
 
 1. Open the OmniRoute web UI (usually `http://localhost:20128`).
 2. Add a provider account (e.g. **Kiro**) and authorize via OAuth.
-3. Confirm working models appear in the list (e.g. `kr/claude-sonnet-4.5`).
+3. Confirm working models appear in the list (e.g. `kr/Limi-sonnet-4.5`).
 
-Once an account is authorized, keep `auto` in InfinityClaude's **Settings → Connection** — routing picks a working provider on its own.
+Once an account is authorized, keep `auto` in LimiAI's **Settings → Connection** — routing picks a working provider on its own.
 
-> Stale tokens cause a "Token expired" error — refresh them in the OmniRoute web UI, then hit **"Refresh models"** in InfinityClaude.
+> Stale tokens cause a "Token expired" error — refresh them in the OmniRoute web UI, then hit **"Refresh models"** in LimiAI.
 
 ### Verify the gateway
 
-In InfinityClaude: **Settings → Connection → "Test connection"**. Success = the model list responds in a few dozen milliseconds.
+In LimiAI: **Settings → Connection → "Test connection"**. Success = the model list responds in a few dozen milliseconds.
 
 ## Working with the agent
 
@@ -159,7 +159,7 @@ Each enabled server connects automatically and its tools are exposed to the mode
 
 ## Skills
 
-Skills are folders with a `SKILL.md` (frontmatter metadata: `name`, `description`). Create one in **Settings → Skills**, enable it, and the model will apply it whenever its description matches. Custom skills live in the app's data folder (`%APPDATA%\InfinityClaude\skills\`).
+Skills are folders with a `SKILL.md` (frontmatter metadata: `name`, `description`). Create one in **Settings → Skills**, enable it, and the model will apply it whenever its description matches. Custom skills live in the app's data folder (`%APPDATA%\LimiAI\skills\`).
 
 ## Interface and themes
 
@@ -169,7 +169,7 @@ Visual options: light/dark theme, accent color, density, font size, window round
 
 ## Configuration
 
-Settings are stored in the app data folder (`%APPDATA%\InfinityClaude\config.json`). Everything is manageable from the UI, but the file can be edited by hand too.
+Settings are stored in the app data folder (`%APPDATA%\LimiAI\config.json`). Everything is manageable from the UI, but the file can be edited by hand too.
 
 ## Troubleshooting
 
