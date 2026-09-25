@@ -14,6 +14,18 @@ launch-claude.bat
 build/_auto-icon/
 *.log
 npm-debug.log*
+_logs/
+_e2e/
+tools/
+.infinity-memory.md
+index.html
+assets/
+p align=center.txt
+_t.cmd
+_ui-soft.html
+_smoke_*.txt
+_out.txt
+_err.txt
 
 # Системное
 Thumbs.db

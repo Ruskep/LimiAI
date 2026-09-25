@@ -1,15 +1,15 @@
 {
-  "name": "infinity-claude-desktop",
-  "productName": "InfinityClaude",
-  "version": "1.9.0",
-  "description": "Desktop Claude-style GUI chatting through OmniRoute free gateway",
+  "name": "limiai-desktop",
+  "productName": "LimiAI",
+  "version": "2.0.0",
+  "description": "LimiAI вЂ” desktop agent with real tools, chatting through OmniRoute free gateway",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win",
     "dist:dir": "electron-builder --win --dir"
   },
-  "author": "InfinityClaude",
+  "author": "LimiAI",
   "license": "MIT",
   "devDependencies": {
     "electron": "^33.2.0",
@@ -21,8 +21,8 @@
     "marked": "^15.0.0"
   },
   "build": {
-    "appId": "com.infinityclaude.app",
-    "productName": "InfinityClaude",
+    "appId": "com.limiai.app",
+    "productName": "LimiAI",
     "files": [
       "main.js",
       "preload.js",

@@ -17,6 +17,15 @@ contextBridge.exposeInMainWorld('infinity', {
   // app / locale / onboarding
   getLocale: () => ipcRenderer.invoke('app:locale'),
   setOnboarded: (value) => ipcRenderer.invoke('app:onboarded', value),
+  openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
+  notify: (title, body) => ipcRenderer.invoke('app:notify', { title, body }),
+
+  // omniroute (онбординг)
+  omnirouteStatus: () => ipcRenderer.invoke('omniroute:status'),
+  omnirouteAlive: () => ipcRenderer.invoke('omniroute:alive'),
+  omnirouteInstall: () => ipcRenderer.invoke('omniroute:install'),
+  omnirouteStart: () => ipcRenderer.invoke('omniroute:start'),
+  onOmnirouteProgress: (cb) => on('omniroute:progress', cb),
 
   // updates
   checkUpdates: () => ipcRenderer.invoke('update:check'),
@@ -56,9 +65,29 @@ contextBridge.exposeInMainWorld('infinity', {
   // MCP
   mcpTest: (server) => ipcRenderer.invoke('mcp:test', server),
 
+  // ROLimi (Roblox Studio)
+  roliMcpStatus: () => ipcRenderer.invoke('roli:mcpStatus'),
+
   // fsx helper
   fsxRead: (payload) => ipcRenderer.invoke('fsx:read', payload),
   fsxReadAttached: (payload) => ipcRenderer.invoke('fsx:readAttached', payload),
+  fsxList: (payload) => ipcRenderer.invoke('fsx:list', payload),
+
+  // filecache (кэш файлов проекта)
+  filesCacheGet: (workspaceId) => ipcRenderer.invoke('files:cache:get', { workspaceId }),
+
+  // site preview
+  siteOpen: (dir) => ipcRenderer.invoke('site:open', dir),
+  siteClose: () => ipcRenderer.invoke('site:close'),
+  onSiteChanged: (cb) => on('site:changed', cb),
+
+  // reminders (Запланировано)
+  remindersList: () => ipcRenderer.invoke('reminders:list'),
+  remindersAdd: (payload) => ipcRenderer.invoke('reminders:add', payload),
+  remindersUpdate: (payload) => ipcRenderer.invoke('reminders:update', payload),
+  remindersDelete: (payload) => ipcRenderer.invoke('reminders:delete', payload),
+  onRemindersChanged: (cb) => on('reminders:changed', cb),
+  onRemindersDue: (cb) => on('reminders:due', cb),
 
   // agent
   startAgent: (payload) => ipcRenderer.invoke('agent:start', payload),

@@ -1,4 +1,4 @@
-﻿const api = window.infinity;
+const api = window.infinity;
 
 /* ---------- единый диалог (подтверждение / ввод текста) ----------
    В Electron нативные confirm()/prompt() не работают (возвращают
@@ -88,6 +88,7 @@ const state = {
   workspaces: [],
   activeWorkspace: null,
   activeChatId: null,
+  lastNormalWsId: null, // последний обычный воркспейс (не ROLimi) — для возврата по кнопке
   collapsedWs: null,
   skills: [],
   skillEnabled: {},
@@ -293,6 +294,56 @@ function setStatus(cls, text) {
   elStatusDot.className = 'dot ' + cls;
   elStatusText.textContent = text;
 }
+/* ---------- звуки и уведомления ---------- */
+
+// название файла звука для события: send | end | permission | click
+// берём из настроек (cfg-snd-*), пусто = выключено
+function soundFile(kind) {
+  try {
+    const s = state.settings || {};
+    const key = { send: 'sndSend', end: 'sndEnd', permission: 'sndPermission', click: 'sndClick' }[kind];
+    const file = key ? s[key] : null;
+    return file && typeof file === 'string' && file.trim() ? file.trim() : null;
+  } catch (_) { return null; }
+}
+
+// воспроизвести звук события (если выбран в настройках)
+function playUiSound(kind) {
+  try {
+    const file = soundFile(kind);
+    if (!file) return;
+    const url = 'assets/sounds/' + file;
+    const a = new Audio(url);
+    a.volume = 0.85;
+    a.play();
+  } catch (_) { /* звук не критичен */ }
+}
+
+// системное уведомление Windows (если включено в настройках)
+function sysNotify(title, body) {
+  try {
+    const s = state.settings || {};
+    if (s.sndSysNotify === false) return;
+    if (typeof api.notify === 'function') api.notify(title, body).catch(() => {});
+  } catch (_) { /* ignore */ }
+}
+
+// «задача окончена» — уведомление, если окно не на фокусе
+function notifyTaskDone() {
+  try {
+    if (document.hasFocus()) return;
+    sysNotify('LimiAI — задача окончена', 'Limi закончила отвечать и ждёт тебя.');
+  } catch (_) { /* ignore */ }
+}
+
+// «запрос разрешения» — уведомление, если окно не на фокусе
+function notifyApproval() {
+  try {
+    if (document.hasFocus()) return;
+    sysNotify('LimiAI — запрос разрешения', 'Limi просит разрешение на действие.');
+  } catch (_) { /* ignore */ }
+}
+
 
 function autosize() {
   elInput.style.height = 'auto';
@@ -362,7 +413,7 @@ function addUserMsg(text, attachments, sess) {
 
 function addAssistantMsgStreamingLabel(round, sess) {
   const m = addMsgEl(sess);
-  m.label.textContent = 'Claude';
+  m.label.textContent = 'Limi';
   m.label.dataset.round = round;
   const md = document.createElement('div');
   md.className = 'markdown';
@@ -481,6 +532,55 @@ async function loadWorkspaces() {
 
 function isNoneWs(ws) { return ws && ws.id === 'none'; }
 
+/* ---------- ROLimi (Roblox Studio) ---------- */
+
+function isRoliWs(ws) { return !!(ws && ws.kind === 'rolimi'); }
+
+function isRoliActive() { return isRoliWs(state.activeWorkspace); }
+
+// включает/выключает «режим ROLimi»: синюю тему, статус Roblox, скрытие папок
+function updateRoliMode() {
+  const on = isRoliActive();
+  document.body.classList.toggle('roli', on);
+  const roliBtn = $('rolimi-btn');
+  if (roliBtn) roliBtn.classList.toggle('active', on);
+  const addWs = $('add-ws-btn');
+  if (addWs) addWs.classList.toggle('hidden', on);
+  const status = $('roli-status');
+  if (status) status.classList.toggle('hidden', !on);
+  const emptyAdd = $('empty-add-ws');
+  if (emptyAdd) emptyAdd.classList.toggle('hidden', on);
+  if (on) refreshRoliStatus();
+}
+
+// проверяет подключение Roblox Studio MCP и показывает статус в сайдбаре
+async function refreshRoliStatus() {
+  const dot = $('roli-dot');
+  const txt = $('roli-status-text');
+  const btn = $('roli-connect-btn');
+  if (!dot || !txt) return;
+  if (btn) btn.disabled = true;
+  dot.className = 'roli-dot';
+  txt.textContent = i18nT('roliChecking');
+  try {
+    const res = await api.roliMcpStatus();
+    if (res && res.ok) {
+      dot.className = 'roli-dot ok';
+      txt.textContent = i18nT('roliOk', { n: res.tools || 0 });
+      txt.title = '';
+    } else {
+      dot.className = 'roli-dot bad';
+      txt.textContent = i18nT('roliBad');
+      txt.title = (res && res.error) || '';
+    }
+  } catch (_) {
+    dot.className = 'roli-dot bad';
+    txt.textContent = i18nT('roliBad');
+    txt.title = '';
+  }
+  if (btn) btn.disabled = false;
+}
+
 function toggleWsCollapse(wsId) {
   if (!state.collapsedWs) state.collapsedWs = new Set();
   if (state.collapsedWs.has(wsId)) state.collapsedWs.delete(wsId);
@@ -585,17 +685,18 @@ function renderWorkspaces() {
     if (savedCollapsed && Array.isArray(savedCollapsed)) {
       savedCollapsed.forEach(id => state.collapsedWs.add(id));
     } else {
-      // по умолчанию реальные папки свёрнуты, кроме активной; «Без проекта» раскрыта
+      // по умолчанию реальные папки свёрнуты, кроме активной; «Без проекта» и ROLimi раскрыты
       for (const w of state.workspaces) {
-        if (!isNoneWs(w) && w.id !== activeId) state.collapsedWs.add(w.id);
+        if (!isNoneWs(w) && !isRoliWs(w) && w.id !== activeId) state.collapsedWs.add(w.id);
       }
     }
   }
   for (const ws of state.workspaces) {
     const isNone = isNoneWs(ws);
+    const isRoli = isRoliWs(ws);
     const collapsed = state.collapsedWs.has(ws.id);
     const group = document.createElement('div');
-    group.className = 'ws-group';
+    group.className = 'ws-group' + (isRoli ? ' ws-group-roli' : '');
     group.dataset.wsId = ws.id;
 
     const head = document.createElement('div');
@@ -604,12 +705,14 @@ function renderWorkspaces() {
       <span class="chev ${collapsed ? '' : 'open'}">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </span>
-      <span class="folder-ic">${isNone
+      <span class="folder-ic">${isRoli
+        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6h12v12h-12v-12zM6 6l12 12M18 6v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        : isNone
         ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
         : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>'}</span>
       <span class="ws-name" title="${escapeHtml(ws.path || '')}">${escapeHtml(ws.name)}</span>
       <span class="ws-count">${(ws.chats || []).length || ''}</span>
-      ${isNone ? '' : '<button class="ws-del" title="' + i18nT('deleteProjectTitle') + '">✕</button>'}`;
+      ${(isNone || isRoli) ? '' : '<button class="ws-del" title="' + i18nT('deleteProjectTitle') + '">✕</button>'}`;
     head.onclick = (e) => {
       if (e.target.closest('.ws-del')) return;
       if (e.target.closest('.chev')) {
@@ -618,7 +721,7 @@ function renderWorkspaces() {
       }
       activateWorkspace(ws.id);
     };
-    if (!isNone) {
+    if (!isNone && !isRoli) {
       head.querySelector('.ws-del').onclick = async (e) => {
         e.stopPropagation();
         if (state.settings && state.settings.confirmDelete !== false) {
@@ -838,7 +941,7 @@ function buildChatItem(ws, chat) {
 function renderBreadcrumb() {
   if (state.activeWorkspace) {
     elCrumb.textContent = state.activeWorkspace.name;
-    elCrumb.title = state.activeWorkspace.path;
+    elCrumb.title = isRoliWs(state.activeWorkspace) ? i18nT('roliTitle') : (state.activeWorkspace.path || '');
   } else {
     elCrumb.textContent = i18nT('noProject');
     elCrumb.title = '';
@@ -856,6 +959,7 @@ async function pickWorkspace() {
 }
 
 async function activateWorkspace(id) {
+  siteSaveForChat();
   saveDraft(); // сохраняем неотправленный текст текущего чата
   const ws = await api.workspaceActivate(id);
   if (ws) {
@@ -876,6 +980,7 @@ async function activateWorkspace(id) {
     state.activeSessionId = null;
     clearMessages();
     updateSidebarState();
+    updateRoliMode();
     persistUIState();
     updateStreamUI();
     setStatus('green', i18nT('project') + ': ' + ws.name);
@@ -883,6 +988,7 @@ async function activateWorkspace(id) {
     autosize();
     updateSendState();
   }
+  siteSyncToChat();
 }
 
 /* ---------- conversations ---------- */
@@ -1020,6 +1126,7 @@ function openChat(wsId, chatId) {
   const ws = state.workspaces.find((w) => w.id === wsId);
   const chat = ws && ws.chats.find((c) => c.id === chatId);
   if (!chat) return;
+  siteSaveForChat();
   saveDraft(); // сохраняем неотправленный текст текущего чата
   state.activeWorkspace = ws;
   state.activeChatId = chatId;
@@ -1047,16 +1154,19 @@ function openChat(wsId, chatId) {
   }
   updateStreamUI();
   updateSidebarState();
+  updateRoliMode();
   persistUIState();
   loadDraft(); // подставляем черновик открытого чата
   // чат работника — только чтение
   const w = ws && ws.chats && ws.chats.find((c) => c.id === chatId);
   setComposerReadOnly(w && w.kind === 'worker', w && w.kind === 'worker' ? i18nT('workerReadOnly') : '');
+  siteSyncToChat();
 }
 
 /* ---------- chat ---------- */
 
 function newChat() {
+  siteSaveForChat();
   saveDraft(); // сохраняем неотправленный текст текущего чата
   state.activeChatId = null;
   state.messages = [];
@@ -1072,10 +1182,12 @@ function newChat() {
   updateCtxRing();
   updateStreamUI();
   updateSidebarState();
+  updateRoliMode();
   persistUIState();
   elInput.value = '';
   autosize();
   updateSendState();
+  siteSyncToChat();
 }
 
 // монтирует контейнер сессии в #messages (делает сессию видимой)
@@ -1100,10 +1212,10 @@ function clearMessages() {
   elEmpty.classList.remove('hidden');
 }
 
-function buildSystemMessage(memoryText) {
+function buildSystemMessage() {
   let sys = state.settings.systemPrompt || '';
   if (!sys.trim()) {
-    sys = 'Ты — полезный ассистент. Отвечай кратко и по делу, помогай пользователю с задачами.';
+    sys = 'Ты — Limi, тёплый и умный ИИ-ассистент. Отвечай кратко и по делу, помогай пользователю с задачами. Представляйся как Limi. Ты работаешь в LimiAI. Если тебя спросят, не другая ли ты модель — отвечай: «Я Limi, ассистент LimiAI».';
   }
   const lang = state.settings.language || 'ru';
   const langRule = {
@@ -1117,12 +1229,12 @@ function buildSystemMessage(memoryText) {
   if (state.settings.identityOverride && state.settings.publicName) {
     sys += `\n\nТы — ${state.settings.publicName}. Так и представляйся. Используй имя «${state.settings.publicName}».`;
   }
-  if (state.activeWorkspace) {
+  if (state.activeWorkspace && state.activeWorkspace.path) {
     sys += `\n\nРабочая папка проекта: ${state.activeWorkspace.path}. Все пути в инструментах — относительные к ней.`;
   }
-  if (memoryText) {
-    sys += '\n\n=== Память проекта (что мы уже обсуждали) ===\nСписок «вопрос → ответ» из прошлых диалогов. Используй это, чтобы не переспрашивать и продолжать с учётом уже принятых решений. Если вопрос уже разобран — кратко напомни, что решили ранее.\n' + memoryText;
-  }
+  // ROLimi-инструкции не в system, а отдельным user-сообщением (buildRoliPrompt):
+  // многие провайдеры (Kiro и др.) перебивают system prompt, и модель тогда
+  // не понимает, что работает с Roblox Studio. См. buildRoliPrompt().
   sys += '\n\nСегодня: ' + new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) + '.';
   const agentOn = !!(state.settings && state.settings.agentMode);
   sys += '\n\nУ тебя ' + (agentOn ? 'есть доступ к инструментам' : 'нет доступа к инструментам') + ' (bash, файлы, интернет).';
@@ -1139,6 +1251,27 @@ function formatMemory(entries) {
     return '• Вопрос: ' + q + '\n  Ответ: ' + a;
   });
   return lines.join('\n');
+}
+
+// решает, стоит ли записывать обмен «вопрос → ответ» в долговременную память.
+// Отсекаем мусор: приветствия, благодарности, служебные команды, ошибки шлюза,
+// пустые/короткие реплики — чтобы полезные факты не вытеснялись хламом.
+function shouldRemember(q, a) {
+  const Q = String(q || '').trim();
+  const A = String(a || '').trim();
+  if (!Q || !A) return false;
+  // ошибки шлюза/провайдера — не «факты», а технические сбои
+  if (/\[ошибка\]/i.test(A) || /HTTP\s*[45]\d\d/i.test(A) || /rate_limited|stream_early_eof|no active credentials|insufficient_balance|model_not_found/i.test(A)) return false;
+  // слишком короткие реплики («привет», «ок», «продолжай») и ответы-односложки
+  if (Q.length < 25 || A.length < 30) return false;
+  // приветствия/благодарности/прощания в коротком вопросе
+  const smallTalk = /^(привет|здравствуй|здорово|хай|hello|hi|спасибо|благодарю|пока|до свидания|ок|окей|ладно|понятно|понял|ага|угу|да|нет|хорошо|отлично|супер|круто|молодец|продолжай|дальше|давай|жду|ау|ты тут|что|ну что|че)[\s!?.,]*$/i;
+  if (smallTalk.test(Q)) return false;
+  // вопрос — короткая команда на действие, ответ — отчёт «готово/сделал» (не обсуждаем)
+  const cmdLike = /^(сделай|напиши|создай|измени|удали|почини|исправь|добавь|покажи|открой|прочитай|переименуй|поставь|установи|запусти|проверь|обнови|выполни|найди|переведи)\b/i;
+  const reportLike = /^(готово|сделал|сделано|ок|окей|всё|выполнено|запустил|установил|изменил|исправил|обновил|проверил)\b/i;
+  if (Q.length < 60 && cmdLike.test(Q) && reportLike.test(A)) return false;
+  return true;
 }
 
 // длина контента одного сообщения (строки или массива частей)
@@ -1238,6 +1371,22 @@ function enabledSkills() {
   return state.skills.filter((s) => state.skillEnabled[s.id]).map((s) => ({ ...s }));
 }
 
+// Контекст проекта (память + кэш файлов) вставляем отдельным user-сообщением,
+// а не в system prompt: многие провайдеры (Kiro и др.) перебивают system,
+// и модель тогда не видит ни память, ни кэш — и перечитывает файлы заново.
+// Так же, как сделано со скилами.
+function buildProjectContextPrompt(memoryText, fileCacheText) {
+  const parts = [];
+  if (memoryText && memoryText.trim()) {
+    parts.push('=== Память проекта (что мы уже обсуждали) ===\nСписок «вопрос → ответ» из прошлых диалогов. Используй это, чтобы не переспрашивать и продолжать с учётом уже принятых решений. Если вопрос уже разобран — кратко напомни, что решили ранее.\n' + memoryText);
+  }
+  if (fileCacheText && fileCacheText.trim()) {
+    parts.push('=== Файлы проекта (кэш) ===\nЭто структура проекта и содержимое файлов, которые уже просматривались. Используй их, чтобы НЕ делать повторные list_dir/read_file, если файл не менялся. Если нужна свежая версия файла или файла нет в кэше — прочитай его.\n' + fileCacheText);
+  }
+  if (!parts.length) return '';
+  return 'Справочный контекст проекта (не повторяй list_dir/read_file для того, что здесь уже есть):\n\n' + parts.join('\n\n');
+}
+
 // Скилы вставляем отдельным user-сообщением перед историей, а не в system,
 // потому что многие провайдеры (Kiro и др.) перебивают system prompt.
 function buildSkillPrompt() {
@@ -1253,6 +1402,29 @@ function buildSkillPrompt() {
     'НЕ предлагай активировать скил, НЕ рекламируй его и НЕ упоминай его в обычном разговоре или приветствии.',
     'Если пользователь просто общается или задача не подходит ни одному скилу — работай без скилов, как обычно.'
   ].join('\n');
+}
+
+// Инструкции раздела ROLimi (Roblox Studio). Отдельным user-сообщением, а не в system:
+// многие провайдеры перебивают system prompt, и модель тогда не понимает,
+// что работает со студией — и не использует MCP-инструменты Roblox.
+function buildRoliPrompt() {
+  if (!isRoliActive()) return '';
+  return '=== РЕЖИМ ROLimi: Roblox Studio ===\n' +
+    'Ты находишься в разделе ROLimi — интеграция LimiAI с Roblox Studio. Это отдельный режим: ты помогаешь разрабатывать игры Roblox.\n' +
+    'Roblox Studio — среда разработки Roblox. Проект называется «место» (place), код пишется на Luau (диалект Lua).\n' +
+    'Через MCP-инструменты (префикс mcp__roblox_studio__) ты подключён к открытой студии. Основные инструменты:\n' +
+    '- list_roblox_studios — список открытых студий. Почти каждый вызов Roblox требует параметр studio_id — бери его отсюда;\n' +
+    '- search_game_tree / inspect_instance — исследовать структуру игры и свойства инстансов;\n' +
+    '- script_read / multi_edit / script_search / script_grep — чтение и правка скриптов (пути вида game.ServerScriptService.MyScript);\n' +
+    '- execute_luau — выполнить Luau-код в студии (параметр datamodel_type: Edit, Client или Server);\n' +
+    '- start_stop_play / screen_capture / get_console_output — запустить плейтест, снять кадр, прочитать вывод;\n' +
+    '- generate_mesh / generate_material / generate_procedural_model / insert_asset — создание ассетов и вставка по ID;\n' +
+    '- search_asset — поиск ассетов в Creator Store и инвентаре;\n' +
+    '- subagent — субагент для сложных задач (explore — исследование, playtest — проверка геймплея);\n' +
+    '- http_get / skill — документация Roblox и лучшие практики.\n' +
+    'Как работать: сначала осмотрись (list_roblox_studios → search_game_tree → script_search), затем действуй. Скрипты правь через multi_edit (datamodel_type: Edit). Для проверки используй execute_luau и start_stop_play + screen_capture.\n' +
+    'Если инструменты Roblox недоступны — студия не запущена или MCP выключен. Скажи пользователю: в Roblox Studio открой Assistant → Manage MCP Servers → включи «Enable Studio as MCP server», и нажми «Проверить» в сайдбаре ROLimi.\n' +
+    'Папки проекта здесь нет: файловые инструменты работают относительно системных папок, используй их только для вспомогательных файлов.';
 }
 
 const TEXT_EXTS = /\.(txt|md|markdown|js|jsx|ts|tsx|json|py|html|css|scss|xml|yml|yaml|sh|bat|ps1|cmd|cs|java|c|cpp|h|sql|log|ini|cfg|toml|env|gitignore|vue|svelte|php|rb|go|rs|swift|kt|dart|lua|r|pl|svg)$/i;
@@ -1308,6 +1480,7 @@ async function send() {
   const sess = currentSession();
   if (sess && sess.streaming) return;
   if (!text && !state.pendingFiles.length) return;
+  playUiSound('send');
 
   // активный чат мог быть удалён/пересоздан — если id не существует, стартуем новый
   // в текущем проекте, чтобы сообщение не улетало в «Без проекта» со старым id.
@@ -1364,7 +1537,14 @@ async function send() {
       memoryText = formatMemory(await api.memoryRead(state.activeWorkspace.id));
     } catch (_) { memoryText = ''; }
   }
-  const systemMsg = buildSystemMessage(memoryText);
+  let fileCacheText = '';
+  if (state.activeWorkspace) {
+    try {
+      fileCacheText = (await api.filesCacheGet(state.activeWorkspace.id)).text || '';
+    } catch (_) { fileCacheText = ''; }
+  }
+  const systemMsg = buildSystemMessage();
+  const projectContextPrompt = buildProjectContextPrompt(memoryText, fileCacheText);
 
   // ---- авто-сжатие контекста: если чат заполнил >80% бюджета, старую часть
   // превращаем в резюме, чтобы модель не переваривала простыню и быстрее стартовала
@@ -1417,6 +1597,10 @@ async function send() {
       card.dataset.callId = chunk.callId;
       target.toolCards.push(card);
       if (chunk.allowed) setStatus('amber', i18nT('statusExec', { tool: humanTool(chunk.tool) }));
+      // Site preview: как только агент пишет html — открываем предпросмотр справа
+      if ((chunk.tool === 'write_file' || chunk.tool === 'edit_file') && chunk.params && typeof window.maybeOpenSitePreview === 'function') {
+        window.maybeOpenSitePreview(chunk.tool, chunk.params);
+      }
     } else if (chunk.type === 'tool_result') {
       const card = target.toolCards.find((c) => c.dataset.callId === chunk.callId);
       const stateIm = {
@@ -1434,17 +1618,19 @@ async function send() {
       }
       target.messages.push({ role: 'assistant', content: chunk.text });
       updateCtxRing();
-      // записываем «вопрос → ответ» в память проекта
+      // записываем «вопрос → ответ» в память проекта — только содержательные обсуждения
       if (target.wsId && chunk.text && chunk.text.trim()) {
         const lastUser = [...target.messages].reverse().find((m) => m.role === 'user');
         if (lastUser) {
           const q = msgToText(lastUser.content).replace(/\s+/g, ' ').trim().slice(0, 220);
           const a = chunk.text.replace(/\s+/g, ' ').trim().slice(0, 280);
-          if (q && a) api.memoryAppend({ workspaceId: target.wsId, q, a }).catch(() => {});
+          if (q && a && shouldRemember(q, a)) api.memoryAppend({ workspaceId: target.wsId, q, a }).catch(() => {});
         }
       }
       finalize(target, unsub);
       if (state.settings && state.settings.showTokens !== false && chunk.usage) {
+      playUiSound('end');
+      notifyTaskDone();
         const u = chunk.usage;
         setStatus('green', i18nT('statusDoneTokens', { n: ((u.prompt_tokens || 0) + (u.completion_tokens || 0)) }));
       } else {
@@ -1495,8 +1681,11 @@ async function send() {
     for (const k of kept) history.push(k);
   }
   const skillPrompt = buildSkillPrompt();
+  const roliPrompt = buildRoliPrompt();
   const messages = [
     { role: 'system', content: systemMsg },
+    ...(projectContextPrompt ? [{ role: 'user', content: projectContextPrompt }] : []),
+    ...(roliPrompt ? [{ role: 'user', content: roliPrompt }] : []),
     ...(skillPrompt ? [{ role: 'user', content: skillPrompt }] : []),
     ...(useSummary && target.summary ? [{ role: 'user', content: 'Сжатое резюме более ранней части этого чата:\n' + target.summary }] : []),
     ...history,
@@ -1648,6 +1837,71 @@ async function loadModels() {
   setStatus('green', i18nT('gatewayOk', { n: ids.length }));
 }
 
+// ---- фоновый монитор шлюза ----
+// Статус OmniRoute проверяется постоянно: если шлюз поднялся ПОСЛЕ старта
+// приложения (или упал), UI узнаёт об этом сам, без ручного пересохранения настроек.
+let gwMonBusy = false;
+let gwWasUp = false;
+
+async function gwMonitorTick() {
+  if (gwMonBusy) return;
+  gwMonBusy = true;
+  try {
+    // во время стрима не дёргаем — статус и так занят прогрессом ответа
+    if (Object.values(state.sessions).some((s) => s.streaming)) return;
+    let up = false;
+    try {
+      const res = await api.omnirouteAlive();
+      up = !!(res && res.running);
+    } catch (_) { up = false; }
+    if (up && !gwWasUp) {
+      // шлюз появился (например, OmniRoute запустили вручную) — подгружаем модели
+      gwWasUp = true;
+      loadModels();
+    } else if (!up && gwWasUp) {
+      // шлюз пропал — показываем красный статус, но модель не сбрасываем
+      gwWasUp = false;
+      setStatus('red', i18nT('noGateway'));
+      // самовосстановление: если автозапуск включён — пробуем поднять шлюз сами
+      maybeSelfHealGateway();
+    } else if (!up && !gwWasUp && state.settings && state.settings.omniAutostart) {
+      // шлюз не был жив с самого старта — тоже пробуем (с защитой от частых попыток)
+      maybeSelfHealGateway();
+    }
+  } finally {
+    gwMonBusy = false;
+  }
+}
+
+
+// ---- самовосстановление OmniRoute ----
+// Если omniAutostart включён и шлюз не отвечает — пробуем запустить сами,
+// но не чаще одного раза в 30 секунд, чтобы не спамить процессами.
+let gwHealLastTry = 0;
+let gwHealBusy = false;
+
+function maybeSelfHealGateway() {
+  if (gwHealBusy) return;
+  const now = Date.now();
+  if (now - gwHealLastTry < 30000) return;
+  gwHealLastTry = now;
+  gwHealBusy = true;
+  api.omnirouteStart()
+    .then((res) => {
+      if (res && res.ok) {
+        gwWasUp = true;
+        loadModels();
+      }
+    })
+    .catch(() => {})
+    .finally(() => { gwHealBusy = false; });
+}
+
+function startGatewayWatcher() {
+  gwWasUp = state.models.length > 0;
+  setInterval(gwMonitorTick, 8000);
+}
+
 // «каноническое» имя модели без провайдера и маркеров-настроек — для дедупликации
 function modelCanonical(id) {
   let s = String(id).toLowerCase()
@@ -1709,6 +1963,7 @@ function toggleSkill(id, el) {
 }
 
 function renderSkills() {
+  if (!elSkillsList) return;
   elSkillsList.innerHTML = '';
   if (!state.skills.length) {
     const d = document.createElement('div');
@@ -1872,6 +2127,8 @@ async function setupApproval() {
     $('approval-remember').checked = false;
     $('approval-global').checked = false;
     $('approval').classList.remove('hidden');
+    playUiSound('permission');
+    notifyApproval();
     approvalResolve = (res) => {
       $('approval').classList.add('hidden');
       api.replyApproval(Object.assign({ sessionId: payload.sessionId }, res));
@@ -2043,6 +2300,7 @@ function openSettings() {
     $('cfg-seed').value = s.seed != null ? s.seed : '';
     $('cfg-context').value = Math.round((s.maxContextChars || 120000) / 1000);
     $('cfg-compact').checked = s.autoCompact !== false;
+    $('cfg-omni-autostart').checked = s.omniAutostart === true;
     $('cfg-agent').checked = s.agentMode;
     $('cfg-approve').value = s.autoApprove || 'ask';
     $('cfg-webtools').checked = s.webTools !== false;
@@ -2068,9 +2326,14 @@ function openSettings() {
     $('cfg-language').value = s.language || 'ru';
     $('cfg-ui-language').value = s.uiLanguage || 'auto';
     $('cfg-autoupdate').checked = s.autoUpdate !== false;
-    $('cfg-publicname').value = s.publicName || 'Claude';
+    $('cfg-publicname').value = s.publicName || 'Limi';
     $('cfg-identity').checked = s.identityOverride !== false;
     $('cfg-sysprompt').value = s.systemPrompt || '';
+    $('cfg-snd-send').value = s.sndSend || '';
+    $('cfg-snd-end').value = s.sndEnd || '';
+    $('cfg-snd-permission').value = s.sndPermission || '';
+    $('cfg-snd-click').value = s.sndClick || '';
+    $('cfg-snd-sysnotify').checked = s.sndSysNotify !== false;
     $('conn-test-result').classList.add('hidden');
     fillSettingsModelSelect(s.model || 'auto');
     renderSettingsSkills();
@@ -2173,12 +2436,17 @@ function renderMcpList() {
     head.className = 'mcp-item-head';
 
     const toggle = document.createElement('label');
-    toggle.className = 'chk';
+    toggle.className = 'chk switch-row';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = srv.enabled !== false;
     cb.onchange = () => { srv.enabled = cb.checked; renderMcpList(); };
-    toggle.appendChild(cb);
+    const sw = document.createElement('span');
+    sw.className = 'switch';
+    sw.appendChild(cb);
+    const swKnob = document.createElement('i');
+    sw.appendChild(swKnob);
+    toggle.appendChild(sw);
     const labelSpan = document.createElement('span');
     labelSpan.textContent = i18nT('mcpEnabled');
     toggle.appendChild(labelSpan);
@@ -2307,6 +2575,7 @@ async function saveSettings() {
     seed: $('cfg-seed').value === '' ? null : parseInt($('cfg-seed').value, 10) || null,
     maxContextChars: (parseInt($('cfg-context').value, 10) || 120) * 1000,
     autoCompact: $('cfg-compact').checked,
+    omniAutostart: $('cfg-omni-autostart').checked,
     agentMode: $('cfg-agent').checked,
     autoApprove: $('cfg-approve').value,
     webTools: $('cfg-webtools').checked,
@@ -2329,9 +2598,14 @@ async function saveSettings() {
     language: $('cfg-language').value,
     uiLanguage: $('cfg-ui-language').value,
     autoUpdate: $('cfg-autoupdate').checked,
-    publicName: $('cfg-publicname').value.trim() || 'Claude',
+    publicName: $('cfg-publicname').value.trim() || 'Limi',
     identityOverride: $('cfg-identity').checked,
     systemPrompt: $('cfg-sysprompt').value,
+    sndSend: $('cfg-snd-send').value,
+    sndEnd: $('cfg-snd-end').value,
+    sndPermission: $('cfg-snd-permission').value,
+    sndClick: $('cfg-snd-click').value,
+    sndSysNotify: $('cfg-snd-sysnotify').checked,
     model: $('cfg-model').value,
     mcpServers: state.mcpServers.map((s) => ({
       id: (s.id || '').trim().replace(/\s+/g, '_') || 'mcp',
@@ -2416,9 +2690,185 @@ function setupSettingsTabs() {
   bindVal('cfg-msgwidth', 'cfg-msgwidth-val', 'px');
 }
 
+/* ---------- reminders (Запланировано) ---------- */
+
+let remindersCache = [];
+let reminderEditingId = null;
+
+function repeatLabel(r) {
+  const map = { once: 'reminderOnce', daily: 'reminderDaily', weekly: 'reminderWeekly', monthly: 'reminderMonthly' };
+  return i18nT(map[r] || 'reminderOnce');
+}
+
+function fmtDue(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const hm = d.toLocaleTimeString(i18nLang() === 'en' ? 'en-US' : 'ru-RU', { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return i18nLang() === 'en' ? 'today at ' + hm : 'сегодня в ' + hm;
+  return d.toLocaleString(i18nLang() === 'en' ? 'en-US' : 'ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function tsToLocalInput(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+async function openReminders() {
+  try {
+    remindersCache = await api.remindersList();
+  } catch (_) { remindersCache = []; }
+  reminderEditingId = null;
+  reminderFormReset();
+  renderReminders();
+  $('reminders-modal').classList.remove('hidden');
+  setTimeout(() => $('reminder-title') && $('reminder-title').focus(), 60);
+}
+
+function closeReminders() {
+  const m = $('reminders-modal');
+  if (!m || m.classList.contains('hidden')) return;
+  if (!m._closeT) {
+    m.classList.add('closing');
+    m._closeT = setTimeout(() => {
+      m.classList.remove('closing');
+      m.classList.add('hidden');
+      delete m._closeT;
+    }, 200);
+  }
+}
+
+function reminderFormReset() {
+  reminderEditingId = null;
+  $('reminder-title').value = '';
+  $('reminder-desc').value = '';
+  $('reminder-repeat').value = 'once';
+  $('reminder-when').value = '';
+  $('reminder-save').textContent = i18nT('reminderAdd');
+  $('reminder-cancel-edit').classList.add('hidden');
+}
+
+function renderReminders() {
+  const listEl = $('reminders-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  if (!remindersCache.length) {
+    const d = document.createElement('div');
+    d.className = 'reminders-empty';
+    d.textContent = i18nT('reminderEmpty');
+    listEl.appendChild(d);
+    return;
+  }
+  const now = Date.now();
+  const frag = document.createDocumentFragment();
+  for (const r of remindersCache) {
+    const item = document.createElement('div');
+    const soon = (r.dueAt || 0) - now < 6 * 60 * 60 * 1000;
+    item.className = 'reminder-item' + (soon ? ' soon' : '');
+    item.innerHTML = `
+      <span class="reminder-item-ic">${r.repeat === 'once' ? '⏰' : '🔁'}</span>
+      <div class="reminder-item-main">
+        <div class="reminder-item-title">${escapeHtml(r.title)}</div>
+        ${r.description ? `<div class="reminder-item-desc">${escapeHtml(r.description)}</div>` : ''}
+        <div class="reminder-item-meta">
+          <span>${escapeHtml(fmtDue(r.dueAt))}</span>
+          <span class="reminder-badge">${escapeHtml(repeatLabel(r.repeat))}</span>
+        </div>
+      </div>
+      <div class="reminder-item-actions">
+        <button class="rem-edit" title="${i18nT('reminderEdit')}">✎</button>
+        <button class="rem-del" title="${i18nT('reminderDelete')}">✕</button>
+      </div>`;
+    item.querySelector('.rem-edit').onclick = () => editReminder(r.id);
+    item.querySelector('.rem-del').onclick = async () => {
+      if (state.settings && state.settings.confirmDelete !== false) {
+        const ok = await uiConfirm(i18nT('reminderDeleteQuestion', { name: r.title }), i18nT('confirmTitle'));
+        if (!ok) return;
+      }
+      await api.remindersDelete({ id: r.id });
+      remindersCache = remindersCache.filter((x) => x.id !== r.id);
+      renderReminders();
+      showToast(i18nT('reminderDeleted'), 'success', 2500);
+    };
+    frag.appendChild(item);
+  }
+  listEl.appendChild(frag);
+}
+
+function editReminder(id) {
+  const r = remindersCache.find((x) => x.id === id);
+  if (!r) return;
+  reminderEditingId = id;
+  $('reminder-title').value = r.title;
+  $('reminder-desc').value = r.description || '';
+  $('reminder-repeat').value = r.repeat || 'once';
+  $('reminder-when').value = tsToLocalInput(r.dueAt);
+  $('reminder-save').textContent = i18nT('save');
+  $('reminder-cancel-edit').classList.remove('hidden');
+  $('reminder-title').focus();
+}
+
+async function saveReminder() {
+  const title = $('reminder-title').value.trim();
+  if (!title) { showToast(i18nT('reminderNeedTitle'), 'warning'); $('reminder-title').focus(); return; }
+  const whenVal = $('reminder-when').value;
+  if (!whenVal) { showToast(i18nT('reminderNeedWhen'), 'warning'); $('reminder-when').focus(); return; }
+  const dueAt = new Date(whenVal).getTime();
+  if (!Number.isFinite(dueAt)) { showToast(i18nT('reminderNeedWhen'), 'warning'); return; }
+  const payload = {
+    title,
+    description: $('reminder-desc').value.trim(),
+    repeat: $('reminder-repeat').value,
+    dueAt
+  };
+  let res;
+  if (reminderEditingId) {
+    res = await api.remindersUpdate(Object.assign({ id: reminderEditingId }, payload));
+    if (res && res.ok) showToast(i18nT('reminderUpdated'), 'success', 2500);
+  } else {
+    res = await api.remindersAdd(payload);
+    if (res && res.ok) showToast(i18nT('reminderSaved'), 'success', 2500);
+  }
+  reminderFormReset();
+  try { remindersCache = await api.remindersList(); } catch (_) {}
+  renderReminders();
+}
+
+// «Попросить Limi»: отправляем текст как обычное сообщение в чат,
+// чтобы агент сам создал напоминание через инструмент reminder_add.
+function requestReminderViaAI() {
+  const text = $('reminder-ai-text').value.trim();
+  if (!text) return;
+  const composer = $('composer');
+  const input = $('input');
+  if (!input || !composer) return;
+  // если композер заблокирован (чат работника) — сначала откроем новый чат
+  if (composer.classList.contains('readonly')) newChat();
+  elInput.value = text;
+  $('reminder-ai-text').value = '';
+  closeReminders();
+  autosize();
+  updateSendState();
+  send();
+  showToast(i18nT('reminderAiSent'), 'info', 2000);
+}
+
+function handleRemindersDue(payload) {
+  const list = (payload && payload.list) || [];
+  for (const r of list) {
+    const msg = r.description ? r.title + ' — ' + r.description : r.title;
+    showToast(i18nT('reminderDue') + ': ' + msg, 'warning', 12000);
+  }
+}
+
 /* ---------- init ---------- */
 
 async function init() {
+  if (window.__limiInitDone) return; // защита от повторной инициализации (двойной подгрузки скрипта)
+  window.__limiInitDone = true;
   state.settings = await api.getSettings();
   applyUiSettings();
   await applyUiLanguage();
@@ -2459,17 +2909,53 @@ async function init() {
   }
   $('new-chat-btn').addEventListener('click', newChat);
   $('add-ws-btn').addEventListener('click', pickWorkspace);
+  const roliBtn = $('rolimi-btn');
+  if (roliBtn) roliBtn.addEventListener('click', () => {
+    const roli = state.workspaces.find((w) => w.id === 'rolimi');
+    if (!roli) return;
+    if (isRoliActive()) {
+      // уже в ROLimi — возвращаемся в обычный режим (последний проект или «Без проекта»)
+      const back = state.workspaces.find((w) => w.id === state.lastNormalWsId && !isRoliWs(w))
+        || state.workspaces.find((w) => isNoneWs(w))
+        || state.workspaces.find((w) => !isRoliWs(w));
+      if (back) activateWorkspace(back.id);
+    } else {
+      // запоминаем текущий обычный воркспейс, чтобы вернуться в него
+      if (state.activeWorkspace && !isRoliWs(state.activeWorkspace)) {
+        state.lastNormalWsId = state.activeWorkspace.id;
+      }
+      activateWorkspace(roli.id);
+    }
+  });
+  const roliConn = $('roli-connect-btn');
+  if (roliConn) roliConn.addEventListener('click', refreshRoliStatus);
+  const remBtn = $('reminders-btn');
+  if (remBtn) remBtn.addEventListener('click', openReminders);
+  const remClose = $('reminders-close');
+  if (remClose) remClose.addEventListener('click', closeReminders);
+  const remSave = $('reminder-save');
+  if (remSave) remSave.addEventListener('click', saveReminder);
+  const remCancel = $('reminder-cancel-edit');
+  if (remCancel) remCancel.addEventListener('click', reminderFormReset);
+  const remAiGo = $('reminder-ai-go');
+  if (remAiGo) remAiGo.addEventListener('click', requestReminderViaAI);
+  const remAiText = $('reminder-ai-text');
+  if (remAiText) remAiText.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); requestReminderViaAI(); } });
+  api.onRemindersChanged((payload) => {
+    remindersCache = (payload && payload.list) || [];
+    const m = $('reminders-modal');
+    if (m && !m.classList.contains('hidden')) renderReminders();
+  });
+  api.onRemindersDue((payload) => handleRemindersDue(payload));
   $('empty-add-ws').addEventListener('click', pickWorkspace);
   $('empty-new-chat').addEventListener('click', newChat);
   $('settings-btn').addEventListener('click', openSettings);
   $('theme-btn').addEventListener('click', toggleTheme);
   $('modal-close').addEventListener('click', closeSettings);
   $('save-settings').addEventListener('click', saveSettings);
-  $('skill-add-btn').addEventListener('click', createSkill);
   $('skill-save').addEventListener('click', onSkillSave);
   $('skill-remove').addEventListener('click', removeSkill);
   $('skill-modal-close').addEventListener('click', () => $('skill-modal').classList.add('hidden'));
-  $('skill-install-btn').addEventListener('click', openSkillInstall);
   $('skill-install-close').addEventListener('click', () => $('skill-install-modal').classList.add('hidden'));
   $('skill-install-run').addEventListener('click', runSkillInstall);
   setupSettingsTabs();
@@ -2486,12 +2972,20 @@ async function init() {
   api.onProjectChanged(() => { renderProjects(); renderWorkspaces(); });
 
   setupApproval();
+  // звук клика по кнопкам интерфейса (если выбран в настройках)
+  document.addEventListener('click', (e) => {
+    if (!e.target || typeof e.target.closest !== 'function') return;
+    const el = e.target.closest('button, .side-action, .stab, .switch, label.chk');
+    if (el) playUiSound('click');
+  }, { passive: true });
   setupPoll();
   setupUpdates();
   setStreaming(false);
 
   await Promise.all([loadWorkspaces(), loadModels(), loadSkills()]);
   renderProjects();
+  updateRoliMode();
+  startGatewayWatcher();
 }
 
 async function toggleTheme() {
@@ -2575,22 +3069,27 @@ init().catch((err) => {
 
 function setupOnboarding() {
   const root = $('ob-welcome');
-  if (!root || state.settings.onboarded === true) return;
+  if (!root) return;
+  // онбординг показывается только при первом запуске (пока не завершён через «Начать работу»)
+  if (state.settings && state.settings.onboarded === true) return;
   root.classList.remove('hidden');
 
   const slides = Array.prototype.slice.call(root.querySelectorAll('.ob-slide'));
   const showSlide = (i) => {
     slides.forEach((s, idx) => s.classList.toggle('active', idx === i));
-    if (i === 2) {
-      i18nApplyStaticFor(modelLang, $('ob-demo-slide'));
-      runDemo();
-    }
+    if (i === 2) initOmniSlide();
+    if (i === 3) initProviderSlide();
+    if (i === 4) initAutostartSlide();
   };
   showSlide(0);
   runBoot();
 
   let uiLang = state.settings.uiLanguage || 'auto';
   let modelLang = state.settings.language || 'ru';
+  let omniSkipped = false;
+  let omniDone = false;
+  let providerDone = false;
+  let autostart = !!(state.settings && state.settings.omniAutostart);
 
   const pick = (group, cls, datasetKey, val) => {
     group.forEach((c) => c.classList.toggle('ob-card-active', c.dataset[datasetKey] === val));
@@ -2604,7 +3103,6 @@ function setupOnboarding() {
   modelCards.forEach((c) => c.addEventListener('click', () => {
     modelLang = c.dataset.modelLang;
     pick(modelCards, 'ob-card-active', 'modelLang', modelLang);
-    i18nApplyStaticFor(modelLang, $('ob-demo-slide'));
   }));
 
   $('ob-start').addEventListener('click', () => {
@@ -2617,11 +3115,171 @@ function setupOnboarding() {
     state.settings = Object.assign({}, state.settings, { uiLanguage: uiLang, language: modelLang });
     showSlide(2);
   });
-  $('ob-demo-next').addEventListener('click', () => showSlide(3));
-  $('ob-feat-next').addEventListener('click', () => showSlide(4));
-  $('ob-skill-install').addEventListener('click', () => {
-    exitOnboarding(() => openSkillInstall());
+
+  /* ---- Шаг 1: установка OmniRoute ---- */
+  const omniInstallBtn = $('ob-omni-install');
+  const omniOpenBtn = $('ob-omni-open');
+  const omniProgress = $('ob-omni-progress');
+  const omniFill = $('ob-omni-fill');
+  const omniPct = $('ob-omni-pct');
+  const omniMsg = $('ob-omni-msg');
+  const omniErr = $('ob-omni-err');
+  const omniDoneBox = $('ob-omni-done');
+  const omniNextBtn = $('ob-omni-next');
+
+  const openOmniPanel = () => {
+    api.openExternal((state.settings && state.settings.baseUrl) || 'http://localhost:20128').catch(() => {});
+  };
+  if (omniOpenBtn) omniOpenBtn.addEventListener('click', openOmniPanel);
+
+  const setOmniDone = (done) => {
+    omniDone = done;
+    omniNextBtn.disabled = !done;
+    if (done) {
+      omniDoneBox.classList.remove('hidden');
+      omniInstallBtn.classList.add('hidden');
+    }
+  };
+
+  async function initOmniSlide() {
+    omniErr.classList.add('hidden');
+    if (omniDone) return;
+    try {
+      const st = await api.omnirouteStatus();
+      if (st && st.running) {
+        setOmniDone(true);
+        return;
+      }
+      if (st && st.installed && !st.running) {
+        // установлен, но не запущен — пробуем запустить
+        omniMsg.textContent = 'OmniRoute установлен, запускаю…';
+        omniProgress.classList.remove('hidden');
+        omniFill.style.width = '40%';
+        omniPct.textContent = '40%';
+        const res = await api.omnirouteStart();
+        omniProgress.classList.add('hidden');
+        if (res && res.ok) setOmniDone(true);
+        else {
+          omniErr.textContent = res && res.error ? res.error : 'Не удалось запустить OmniRoute';
+          omniErr.classList.remove('hidden');
+        }
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  omniInstallBtn.addEventListener('click', async () => {
+    omniInstallBtn.disabled = true;
+    omniErr.classList.add('hidden');
+    omniProgress.classList.remove('hidden');
+    omniFill.style.width = '2%';
+    omniPct.textContent = '2%';
+    omniMsg.textContent = 'Проверяю npm…';
+    const off = api.onOmnirouteProgress(({ pct, message }) => {
+      omniFill.style.width = (pct || 0) + '%';
+      omniPct.textContent = (pct || 0) + '%';
+      if (message) omniMsg.textContent = message;
+    });
+    try {
+      const res = await api.omnirouteInstall();
+      off();
+      if (res && res.ok) {
+        setOmniDone(true);
+      } else {
+        omniInstallBtn.disabled = false;
+        omniInstallBtn.classList.remove('hidden');
+        omniErr.textContent = (res && res.error) ? res.error : 'Установка не удалась';
+        omniErr.classList.remove('hidden');
+      }
+    } catch (e) {
+      off();
+      omniInstallBtn.disabled = false;
+      omniInstallBtn.classList.remove('hidden');
+      omniErr.textContent = e.message || 'Установка не удалась';
+      omniErr.classList.remove('hidden');
+    }
   });
+
+  $('ob-omni-next').addEventListener('click', () => showSlide(3));
+  $('ob-omni-skip').addEventListener('click', () => {
+    omniSkipped = true;
+    showSlide(4); // пропущен шаг 1 → пропускаем и шаг 2
+  });
+
+  /* ---- Шаг 2: настройка провайдера ---- */
+  const provStatus = $('ob-provider-status');
+  const provNextBtn = $('ob-provider-next');
+
+  function initProviderSlide() {
+    if (omniSkipped) return; // сюда не попадём, но страховка
+    provStatus.classList.add('hidden');
+  }
+
+  const provOpenBtn = $('ob-provider-open');
+  if (provOpenBtn) provOpenBtn.addEventListener('click', openOmniPanel);
+
+  $('ob-provider-check').addEventListener('click', async () => {
+    const btn = $('ob-provider-check');
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = i18nT('obProvChecking');
+    provStatus.classList.remove('hidden');
+    provStatus.className = 'ob-provider-status';
+    provStatus.textContent = i18nT('obProvChecking');
+    try {
+      const res = await api.listModels(state.settings);
+      if (res && res.error) throw new Error(res.error);
+      const models = res || [];
+      const ids = (models.map((m) => m && m.id).filter(Boolean));
+      if (ids.length > 0) {
+        providerDone = true;
+        provNextBtn.disabled = false;
+        provStatus.className = 'ob-provider-status ok';
+        provStatus.innerHTML = '✓ ' + i18nT('obProvOk', { n: dedupeModels(ids).length });
+      } else {
+        provStatus.className = 'ob-provider-status bad';
+        provStatus.textContent = i18nT('obProvEmpty');
+      }
+    } catch (e) {
+      provStatus.className = 'ob-provider-status bad';
+      provStatus.textContent = i18nT('obProvFail', { e: e.message || '' });
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  });
+
+  $('ob-provider-next').addEventListener('click', () => showSlide(4));
+  $('ob-provider-skip').addEventListener('click', () => showSlide(4));
+
+  /* ---- Шаг 3: автозапуск OmniRoute ---- */
+  const autostartCards = Array.prototype.slice.call(root.querySelectorAll('.ob-autostart-card'));
+  const pickAutostart = (val) => {
+    autostart = val === 'yes';
+    pick(autostartCards, 'ob-card-active', 'autostart', val);
+  };
+  autostartCards.forEach((c) => c.addEventListener('click', () => {
+    pickAutostart(c.dataset.autostart);
+  }));
+
+  function initAutostartSlide() {
+    // подсвечиваем карточку согласно сохранённой настройке
+    pick(autostartCards, 'ob-card-active', 'autostart', autostart ? 'yes' : 'no');
+  }
+
+  const saveAutostart = () => {
+    api.setSettings({ omniAutostart: autostart }).catch(() => {});
+    state.settings = Object.assign({}, state.settings, { omniAutostart: autostart });
+  };
+  $('ob-autostart-next').addEventListener('click', () => {
+    saveAutostart();
+    showSlide(5);
+  });
+  $('ob-autostart-skip').addEventListener('click', () => {
+    autostart = false;
+    saveAutostart();
+    showSlide(5);
+  });
+
   const finish = async () => {
     exitOnboarding(async () => {
       try {
@@ -2630,7 +3288,6 @@ function setupOnboarding() {
       } catch (_) { /* ignore */ }
     });
   };
-  $('ob-finish').addEventListener('click', finish);
   $('ob-enter-app').addEventListener('click', finish);
 }
 
@@ -2890,7 +3547,7 @@ function addEnhancedMessage(role, content, sessionId) {
   
   messageEl.innerHTML = `
     <div class="message-header">
-      <span class="message-role">${role === 'user' ? '👤 Вы' : '🤖 Claude'}</span>
+      <span class="message-role">${role === 'user' ? '👤 Вы' : '🤖 Limi'}</span>
       <span class="message-time">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
     </div>
     <div class="message-content">${formattedContent}</div>

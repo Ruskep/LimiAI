@@ -1,6 +1,9 @@
-﻿const { app, BrowserWindow, ipcMain, Menu, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, nativeImage, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const net = require('net');
+const { execFile, spawn, execSync } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 
 const settings = require('./src/settings');
@@ -8,10 +11,13 @@ const gateway = require('./src/gateway');
 const skills = require('./src/skills');
 const workspaces = require('./src/workspaces');
 const fsx = require('./src/fsx');
+const filecache = require('./src/filecache');
 const shell = require('./src/shell');
 const texttools = require('./src/texttools');
 const webtools = require('./src/webtools');
 const mcp = require('./src/mcp');
+const rolimi = require('./src/rolimi');
+const reminders = require('./src/reminders');
 
 const TOOLS = [
   {
@@ -199,6 +205,64 @@ const TOOLS = [
         required: ['worker_id']
       }
     }
+  },
+  // ===== напоминания («Запланировано») =====
+  {
+    type: 'function',
+    function: {
+      name: 'reminder_add',
+      description: 'Создать напоминание для пользователя (раздел «Запланировано»). Используй, когда пользователь просит напомнить о чём-то. dueAt — момент срабатывания (timestamp в миллисекундах). repeat: once (единоразово), daily, weekly, monthly. Пример: напомни завтра в 10:00 — dueAt = завтра 10:00 по местному времени, repeat = once.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Короткое название напоминания, например «Позвонить клиенту»' },
+          description: { type: 'string', description: 'Подробное описание (необязательно)' },
+          dueAt: { type: 'integer', description: 'Timestamp (мс) первого срабатывания. Для once — конкретное время, для daily/weekly/monthly — первый момент, затем сдвиг на период.' },
+          repeat: { type: 'string', enum: ['once', 'daily', 'weekly', 'monthly'], description: 'Периодичность: once — один раз, daily — ежедневно, weekly — еженедельно, monthly — ежемесячно' }
+        },
+        required: ['title', 'dueAt']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reminder_list',
+      description: 'Показать список всех напоминаний пользователя (раздел «Запланировано»): названия, описания, когда сработают, периодичность.',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reminder_update',
+      description: 'Изменить существующее напоминание: название, описание, периодичность или время срабатывания (dueAt — timestamp мс).',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'id напоминания (из reminder_list)' },
+          title: { type: 'string', description: 'Новое название' },
+          description: { type: 'string', description: 'Новое описание' },
+          dueAt: { type: 'integer', description: 'Новый timestamp (мс) срабатывания' },
+          repeat: { type: 'string', enum: ['once', 'daily', 'weekly', 'monthly'], description: 'Новая периодичность' }
+        },
+        required: ['id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reminder_delete',
+      description: 'Удалить напоминание полностью.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'id напоминания (из reminder_list)' }
+        },
+        required: ['id']
+      }
+    }
   }
 ];
 
@@ -208,7 +272,18 @@ const sessionRules = [];   // { tool, pathPrefix, allow }
 // Набор инструментов, которые отдаём модели (учитывая настройку «веб-доступ»)
 // role='manager' — руководитель проекта: управляет работниками, но НЕ трогает код сам.
 // role='worker' — исполнитель: обычные инструменты, но без менеджерских.
-async function toolSet(cfg, isManager, isWorker) {
+// isRoli — раздел ROLimi (Roblox Studio): дополнительно подключаем MCP-инструменты Roblox.
+function roliMcpServer(cfg) {
+  const c = (cfg && cfg.roliMcp) || {};
+  return {
+    id: 'roblox_studio',
+    command: c.command || 'cmd.exe /c %LOCALAPPDATA%\\Roblox\\mcp.bat',
+    url: '',
+    enabled: c.enabled !== false
+  };
+}
+
+async function toolSet(cfg, isManager, isWorker, isRoli) {
   const MANAGER_TOOLS = new Set(['project_status', 'create_worker', 'assign_task', 'read_worker']);
   let tools = TOOLS.filter((t) => !['web_search', 'web_fetch'].includes(t.function.name));
   if (cfg.webTools !== false) {
@@ -225,6 +300,15 @@ async function toolSet(cfg, isManager, isWorker) {
       if (mcpTools.length) tools = tools.concat(mcpTools);
     } catch (err) {
       console.error('MCP tools load failed:', err.message);
+    }
+  }
+  // ROLimi: инструменты Roblox Studio (только в разделе ROLimi)
+  if (cfg.agentMode && isRoli) {
+    try {
+      const roliTools = await mcp.listTools([roliMcpServer(cfg)]);
+      if (roliTools.length) tools = tools.concat(roliTools);
+    } catch (err) {
+      console.error('Roblox MCP tools load failed:', err.message);
     }
   }
   return tools;
@@ -294,7 +378,7 @@ function createWindow() {
     height: 860,
     minWidth: 1024,
     minHeight: 640,
-    title: 'InfinityClaude',
+    title: 'LimiAI',
     icon: path.join(__dirname, 'build', 'icon.ico'),
     backgroundColor: '#f9f7f4',
     autoHideMenuBar: true,
@@ -307,6 +391,7 @@ function createWindow() {
   });
 
   mainWindow.setMenuBarVisibility(false);
+  mainWindow.maximize(); // запуск на весь экран (развёрнутое окно, не полноэкранный режим)
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   if (process.platform === 'win32') {
@@ -314,15 +399,205 @@ function createWindow() {
   }
 }
 
+/* ---------- site preview server ----------
+   Локальный HTTP-сервер: раздаёт файлы активного проекта, чтобы предпросмотр
+   сайта в iframe работал с относительными путями, CSS, JS и fetch. */
+const SITE_MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml',
+  '.pdf': 'application/pdf',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg'
+};
+
+let sitePreview = { server: null, root: null, port: null };
+
+function siteFreePort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.on('error', reject);
+    s.listen(0, () => {
+      const p = s.address().port;
+      s.close();
+      resolve(p);
+    });
+  });
+}
+
+function stopSiteServer() {
+  if (sitePreview.server) {
+    try { sitePreview.server.close(); } catch (_) {}
+    sitePreview.server = null;
+  }
+  sitePreview.root = null;
+  sitePreview.port = null;
+}
+
+function startSiteServer(root) {
+  if (sitePreview.server && sitePreview.root === root) {
+    return Promise.resolve(`http://127.0.0.1:${sitePreview.port}/`);
+  }
+  stopSiteServer();
+  return siteFreePort().then((port) => {
+    sitePreview.port = port;
+    sitePreview.root = root;
+    sitePreview.server = http.createServer((req, res) => {
+      try {
+        const urlPath = decodeURIComponent(req.url.split('?')[0]);
+        let rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
+        let abs = path.resolve(root, rel);
+        if (abs !== root && !abs.startsWith(root + path.sep)) {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Not found');
+          return;
+        }
+        let stat = null;
+        try { stat = fs.statSync(abs); } catch (_) {}
+        if (stat && stat.isDirectory()) {
+          const idx = path.join(abs, 'index.html');
+          try {
+            if (fs.statSync(idx).isFile()) { abs = idx; stat = fs.statSync(idx); }
+            else { stat = null; }
+          } catch (_) { stat = null; }
+        }
+        if (!stat || !stat.isFile()) {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Not found');
+          return;
+        }
+        const ext = path.extname(abs).toLowerCase();
+        res.writeHead(200, {
+          'Content-Type': SITE_MIME[ext] || 'application/octet-stream',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*'
+        });
+        fs.createReadStream(abs).pipe(res);
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Server error: ' + e.message);
+      }
+    });
+    sitePreview.server.listen(port, '127.0.0.1');
+    return `http://127.0.0.1:${port}/`;
+  });
+}
+
+function notifySiteChanged(wsPath, relPath) {
+  if (!sitePreview.root || !sitePreview.server) return;
+  try {
+    const abs = path.resolve(wsPath, relPath);
+    if (abs !== sitePreview.root && !abs.startsWith(sitePreview.root + path.sep)) return;
+    const ext = path.extname(relPath).toLowerCase();
+    if (['.html', '.htm', '.css', '.js', '.mjs'].includes(ext)) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('site:changed', { path: relPath });
+      }
+    }
+  } catch (_) {}
+}
+
+ipcMain.handle('site:open', async (_e, { dir }) => {
+  if (!dir || typeof dir !== 'string') return { url: null };
+  return { url: await startSiteServer(dir) };
+});
+ipcMain.handle('site:close', () => { stopSiteServer(); return true; });
+ipcMain.handle('fsx:list', async (_e, { workspaceId, relPath }) => {
+  const ws = workspaces.get(workspaceId);
+  if (!ws) return { entries: [] };
+  return { entries: await fsx.list(ws.path, relPath || '') };
+});
+
+/* ---------- filecache: кэш файлов проекта ---------- */
+
+ipcMain.handle('files:cache:get', (_e, { workspaceId }) => {
+  const ws = workspaces.get(workspaceId);
+  if (!ws || !ws.path) return { text: '' };
+  return { text: filecache.format(ws.path) };
+});
+
+// предзаполнить кэш дерева проекта: рекурсивно обходим папки (кроме тяжёлых)
+// и пишем каждую в кэш, чтобы модель сразу видела структуру проекта
+async function primeFileCache(wsPath) {
+  if (!wsPath) return;
+  try {
+    const cache = filecache.load(wsPath);
+    if (cache && cache.dirs && Object.keys(cache.dirs).length > 0) return; // уже заполнен
+    const SKIP = new Set(['node_modules', '.git', 'release', 'dist', 'build', 'out', 'coverage', '.vs', '.idea', '__pycache__', '.venv', 'venv', '.cache']);
+    const walk = async (rel, depth) => {
+      if (depth > 4) return;
+      let entries;
+      try { entries = await fsx.list(wsPath, rel); } catch (_) { return; }
+      filecache.updateTree(wsPath, rel, entries);
+      for (const e of entries) {
+        if (e.type === 'dir' && !SKIP.has(e.name)) {
+          await walk(rel ? rel + '/' + e.name : e.name, depth + 1);
+        }
+      }
+    };
+    await walk('', 0);
+  } catch (_) {}
+}
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null); // блокирует меню на Alt полностью
   if (process.platform === 'win32') {
-    app.setAppUserModelId('infinityclaude.desktop');
+    app.setAppUserModelId('limiai.desktop');
   }
   settings.init();
   workspaces.init();
   createWindow();
   setupAutoUpdater();
+  // автозапуск OmniRoute: если включён в настройках — тихо поднимаем шлюз в фоне
+  // (дочерний процесс со скрытым окном, без отдельного CMD-приложения)
+  if (settings.get().omniAutostart) {
+    logOmni('autostart: true, checking gateway…');
+    setTimeout(async () => {
+      const alive = await gatewayAlive();
+      logOmni('gateway alive at start: ' + alive);
+      if (!alive) {
+        logOmni('starting embedded…');
+        startGatewayEmbedded();
+        // самовосстановление: если через 6с шлюз не поднялся — пробуем ещё (до 3 раз)
+        let tries = 1;
+        const retry = setTimeout(async () => {
+          const up = await gatewayAlive();
+          if (!up && tries < 3) {
+            tries++;
+            logOmni('retry #' + tries + ': gateway still down, starting again…');
+            startGatewayEmbedded();
+            setTimeout(() => { /* last check, log only */ }, 6000);
+          } else if (up) {
+            logOmni('gateway is up after retry');
+          }
+        }, 6000);
+      }
+    }, 800);
+  } else {
+    logOmni('autostart: false (настройка omniAutostart)');
+  }
   if (settings.get().autoUpdate !== false) {
     setTimeout(checkForUpdates, 5000);
   }
@@ -361,6 +636,274 @@ ipcMain.handle('models:list', async (_e, cfg) => {
   }
 });
 
+/* ---------- omniroute (установка из онбординга) ---------- */
+
+const execFileAsync = (cmd, args, opts) => new Promise((resolve, reject) => {
+  execFile(cmd, args, Object.assign({ windowsHide: true }, opts || {}), (err, stdout, stderr) => {
+    if (err) reject(err); else resolve({ stdout, stderr });
+  });
+});
+
+function gatewayBaseUrl() {
+  return (settings.get().baseUrl || 'http://localhost:20128').replace(/\/+$/, '');
+}
+
+async function gatewayAlive() {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 3000);
+  try {
+    const res = await fetch(`${gatewayBaseUrl()}/v1/models`, {
+      headers: { Authorization: `Bearer ${settings.get().apiKey || ''}` },
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    return res.ok;
+  } catch (_) {
+    clearTimeout(t);
+    return false;
+  }
+}
+
+// Флаг: OmniRoute поднят самим приложением в этой сессии.
+// Если true — при закрытии LimiAI останавливаем его (omniroute stop).
+// Если пользователь запустил OmniRoute вручную — флаг false, не трогаем.
+let omniStartedByApp = false;
+
+function startGatewayDetached() {
+  try {
+    if (process.platform === 'win32') {
+      // spawn с shell:true — единственный надёжный способ запустить .cmd:
+      // прямой spawn(.cmd) даёт EINVAL, а cmd /c "путь" ломается из-за экранирования кавычек.
+      // ВАЖНО: команда называется `serve`, а НЕ `start` — `omniroute start` не существует
+      // и падает с «too many arguments for 'serve'». `--daemon` поднимает сервер в фоне
+      // и завершается сам, поэтому окно CMD не появляется и процесс не висит.
+      const cmdPath = findOmnirouteCmd();
+      const cmdLine = cmdPath ? '"' + cmdPath + '" serve --daemon' : 'omniroute serve --daemon';
+      const child = spawn(cmdLine, { shell: true, detached: true, stdio: 'ignore', windowsHide: true });
+      omniStartedByApp = true;
+      child.unref();
+    } else {
+      const child = spawn('sh', ['-c', 'nohup omniroute serve --daemon >/dev/null 2>&1 &'], { detached: true, stdio: 'ignore' });
+      omniStartedByApp = true;
+      child.unref();
+    }
+  } catch (_) { /* ignore */ }
+}
+
+// автозапуск OmniRoute «встроенно»: дочерний процесс приложения со скрытым окном,
+// без отдельного CMD-приложения (окно не появляется, процесс живёт вместе с LimiAI)
+
+// найти полный путь к omniroute.cmd (стандартное место npm-глобалов на Windows)
+function findOmnirouteCmd() {
+  try {
+    const candidates = [];
+    if (process.env.APPDATA) candidates.push(path.join(process.env.APPDATA, 'npm', 'omniroute.cmd'));
+    if (process.env.LOCALAPPDATA) candidates.push(path.join(process.env.LOCALAPPDATA, 'npm', 'omniroute.cmd'));
+    for (const c of candidates) {
+      try { if (fs.statSync(c).isFile()) return c; } catch (_) {}
+    }
+  } catch (_) {}
+  return null;
+}
+
+// Файловый лог автозапуска OmniRoute — пишем в папку проекта (_logs/), чтобы видеть
+// реальную картину при старте, не завися от консоли.
+function logOmni(msg) {
+  try {
+    const dir = path.join(__dirname, '_logs');
+    fs.mkdirSync(dir, { recursive: true });
+    const line = new Date().toISOString() + '  ' + msg + '\n';
+    fs.appendFileSync(path.join(dir, 'omniroute-autostart.log'), line);
+  } catch (_) { /* ignore */ }
+  try { console.log('[OmniRoute] ' + msg); } catch (_) { /* ignore */ }
+}
+
+function startGatewayEmbedded() {
+  try {
+    // Если шлюз не отвечает, но порт занят — висит "мёртвый" процесс
+    // (pid-файл не совпадает, `omniroute stop` его не видит). Убиваем его,
+    // иначе новый экземпляр не сможет занять порт.
+    const stuckPid = findPidOnGatewayPort();
+    if (stuckPid) {
+      logOmni('start: port 20128 held by pid ' + stuckPid + ', killing stuck process');
+      killPid(stuckPid);
+      try { execSync('ping -n 2 127.0.0.1 >nul', { timeout: 5000 }); } catch (_) { /* ignore */ }
+    }
+    if (process.platform === 'win32') {
+      // spawn с shell:true — единственный надёжный способ запустить .cmd:
+      // прямой spawn(.cmd) даёт EINVAL, а cmd /c "путь" ломается из-за экранирования кавычек.
+      // ВАЖНО: команда называется `serve`, а НЕ `start` — `omniroute start` не существует
+      // и падает с «too many arguments for 'serve'». `--daemon` поднимает сервер в фоне
+      // и завершается сам, поэтому окно CMD не появляется и процесс не висит.
+      const cmdPath = findOmnirouteCmd();
+      const cmdLine = cmdPath ? '"' + cmdPath + '" serve --daemon' : 'omniroute serve --daemon';
+      logOmni('cmd: ' + cmdLine);
+      const child = spawn(cmdLine, { shell: true, windowsHide: true, stdio: 'ignore' });
+      omniStartedByApp = true;
+      logOmni('spawned pid: ' + (child.pid || '?'));
+      child.on('error', (e) => { logOmni('child error: ' + e.message); console.error('OmniRoute autostart error:', e.message); });
+      child.unref && child.unref();
+    } else {
+      const child = spawn('sh', ['-c', 'exec omniroute serve --daemon'], { stdio: 'ignore' });
+      omniStartedByApp = true;
+      child.on('error', (e) => console.error('OmniRoute autostart error:', e.message));
+      child.unref && child.unref();
+    }
+  } catch (e) { console.error('OmniRoute autostart failed:', e.message); }
+}
+
+// Найти PID процесса, слушающего порт 20128 (Windows: netstat)
+// Возвращает PID или null. Нужен для жёсткого убийства: `omniroute stop`
+// полагается на pid-файл, который у daemon-процесса может быть мёртвым,
+// из-за чего stop говорит «No server is running» и ничего не делает.
+function findPidOnGatewayPort() {
+  try {
+    if (process.platform !== 'win32') return null;
+    const out = execSync('netstat -ano', { timeout: 8000 }).toString();
+    const lines = out.split(/\r?\n/);
+    const port = 20128;
+    for (const line of lines) {
+      if (line.includes(':' + port) && line.toUpperCase().includes('LISTENING')) {
+        const m = line.trim().match(/(\d+)\s*$/);
+        if (m) return Number(m[1]);
+      }
+    }
+  } catch (_) { /* ignore */ }
+  return null;
+}
+
+// Жёстко убить процесс по PID (Windows: taskkill /F)
+function killPid(pid) {
+  try {
+    if (process.platform !== 'win32') return false;
+    execSync('taskkill /F /PID ' + pid, { timeout: 8000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Остановить OmniRoute надёжно: сначала мягкий stop, затем жёсткий kill по порту.
+// Возвращает true, если порт освобождён.
+function stopOmnirouteForced() {
+  const cmdPath = findOmnirouteCmd();
+  try {
+    const cmdLine = cmdPath ? '"' + cmdPath + '" stop' : 'omniroute stop';
+    logOmni('quitting: omniroute stop (soft)');
+    try { execSync(cmdLine, { timeout: 8000 }); } catch (_) { /* ignore */ }
+  } catch (_) { /* ignore */ }
+  // Ждём немного, даём мягкому stop завершиться
+  try { execSync('ping -n 2 127.0.0.1 >nul', { timeout: 5000 }); } catch (_) { /* ignore */ }
+  const pid = findPidOnGatewayPort();
+  if (pid) {
+    logOmni('quitting: port 20128 still held by pid ' + pid + ', killing...');
+    const killed = killPid(pid);
+    logOmni('quitting: kill pid ' + pid + ' -> ' + (killed ? 'OK' : 'FAILED'));
+    return killed;
+  }
+  logOmni('quitting: port 20128 free, nothing to kill');
+  return true;
+}
+
+async function waitForGateway(timeoutMs, onTick) {
+  const start = Date.now();
+  let lastErr = 'timeout';
+  while (Date.now() - start < timeoutMs) {
+    try {
+      if (await gatewayAlive()) return true;
+      lastErr = 'gateway not responding';
+    } catch (e) { lastErr = e.message; }
+    if (onTick) onTick();
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error(lastErr);
+}
+
+ipcMain.handle('omniroute:status', async () => {
+  let installed = false;
+  try {
+    await execFileAsync('omniroute', ['--version'], { timeout: 8000 });
+    installed = true;
+  } catch (_) { /* not installed */ }
+  const running = await gatewayAlive();
+  return { installed, running };
+});
+
+// лёгкая проверка «жив ли шлюз» — только fetch, без запуска процессов.
+// Используется фоновым монитором в renderer, чтобы статус всегда был актуален.
+ipcMain.handle('omniroute:alive', async () => {
+  try {
+    return { running: await gatewayAlive() };
+  } catch (_) {
+    return { running: false };
+  }
+});
+
+ipcMain.handle('omniroute:start', async () => {
+  if (await gatewayAlive()) return { ok: true, running: true };
+  startGatewayDetached();
+  try {
+    await waitForGateway(25000);
+    return { ok: true, running: true };
+  } catch (e) {
+    return { ok: false, running: false, error: e.message };
+  }
+});
+
+ipcMain.handle('omniroute:install', async (event) => {
+  const send = (pct, message) => {
+    try { event.sender.send('omniroute:progress', { pct, message }); } catch (_) { /* ignore */ }
+  };
+  return new Promise((resolve) => {
+    send(2, 'Проверяю npm…');
+    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const child = spawn(npmCmd, ['install', '-g', 'omniroute', '--loglevel=http', '--no-audit', '--no-fund'], { windowsHide: true });
+    let fetched = 0;
+    let pct = 5;
+    let lastErr = '';
+    const onData = (d) => {
+      const text = d.toString();
+      const lines = text.split(/\r?\n/);
+      for (const line of lines) {
+        if (/npm http fetch/i.test(line)) {
+          fetched++;
+          pct = Math.min(72, 6 + fetched * 1.1);
+          send(Math.round(pct), `Скачиваю пакеты… (${fetched})`);
+        } else if (/added \d+ packages/i.test(line)) {
+          send(78, 'Пакеты установлены');
+        } else if (/npm error|ERR!/i.test(line)) {
+          lastErr = line.trim().slice(0, 200);
+        }
+      }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('error', (err) => {
+      send(100, 'Ошибка: ' + err.message);
+      resolve({ ok: false, error: err.message });
+    });
+    child.on('close', async (code) => {
+      if (code !== 0) {
+        send(100, 'Установка прервана (код ' + code + ')');
+        resolve({ ok: false, error: lastErr || ('npm exit code ' + code) });
+        return;
+      }
+      send(84, 'Запускаю OmniRoute…');
+      startGatewayDetached();
+      try {
+        await waitForGateway(28000, () => {
+          send(Math.min(97, 86 + Math.floor((Date.now() % 4000) / 1000)), 'Запускаю OmniRoute…');
+        });
+        send(100, 'Готово');
+        resolve({ ok: true, running: true });
+      } catch (e) {
+        send(100, 'Установлено, но шлюз не запустился: ' + e.message);
+        resolve({ ok: true, running: false, error: e.message });
+      }
+    });
+  });
+});
+
 /* ---------- workspaces ---------- */
 
 ipcMain.handle('workspace:list', () => workspaces.list());
@@ -376,9 +919,11 @@ ipcMain.handle('workspace:select', async () => {
   return ws;
 });
 
-ipcMain.handle('workspace:activate', (_e, id) => {
+ipcMain.handle('workspace:activate', async (_e, id) => {
   activeWorkspaceId = id;
-  return workspaces.get(id);
+  const ws = workspaces.get(id);
+  if (ws && ws.path) await primeFileCache(ws.path);
+  return ws;
 });
 
 ipcMain.handle('workspace:remove', (_e, id) => workspaces.remove(id));
@@ -477,6 +1022,45 @@ ipcMain.handle('context:summarize', async (_e, { model, messages, budget, keepTa
   return { ok: true, text };
 });
 
+/* ---------- напоминания («Запланировано») ---------- */
+
+function broadcastRemindersChange() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('reminders:changed', { list: reminders.list() });
+  }
+}
+
+ipcMain.handle('reminders:list', () => reminders.list());
+ipcMain.handle('reminders:add', (_e, payload) => {
+  const r = reminders.add(payload || {});
+  if (r.ok) broadcastRemindersChange();
+  return r;
+});
+ipcMain.handle('reminders:update', (_e, payload) => {
+  const r = reminders.update((payload || {}).id, payload || {});
+  if (r.ok) broadcastRemindersChange();
+  return r;
+});
+ipcMain.handle('reminders:delete', (_e, payload) => {
+  const r = reminders.remove((payload || {}).id);
+  if (r.ok) broadcastRemindersChange();
+  return r;
+});
+
+// таймер: каждые 20 секунд проверяем, не пора ли напомнить
+setInterval(() => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const now = Date.now();
+  const due = reminders.due(now);
+  if (!due.length) return;
+  const shown = due.map((r) => {
+    reminders.markShown(r.id, now);
+    return { id: r.id, title: r.title, description: r.description, repeat: r.repeat };
+  });
+  mainWindow.webContents.send('reminders:due', { list: shown });
+  broadcastRemindersChange();
+}, 20000);
+
 /* ---------- skills ---------- */
 
 ipcMain.handle('skills:list', () => skills.list());
@@ -496,16 +1080,60 @@ ipcMain.handle('mcp:test', async (_e, server) => {
   }
 });
 
+// статус Roblox Studio MCP для раздела ROLimi
+ipcMain.handle('roli:mcpStatus', async () => {
+  try {
+    const res = await mcp.test(roliMcpServer(settings.get()), { keepAlive: true });
+    return { ok: res.ok, tools: res.tools || 0, error: res.error };
+  } catch (err) {
+    return { ok: false, tools: 0, error: err.message };
+  }
+});
+
 ipcMain.handle('app:locale', () => app.getLocale());
 ipcMain.handle('app:onboarded', (_e, value) => {
   settings.set({ onboarded: value === true });
   return true;
 });
+ipcMain.handle('app:openExternal', async (_e, url) => {
+  try {
+    const { shell } = require('electron');
+    await shell.openExternal(String(url));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// системное уведомление Windows (когда окно свёрнуто или в фоне):
+// «Задача окончена», «Запрос разрешения» и т.п.
+ipcMain.handle('app:notify', (_e, { title, body }) => {
+  try {
+    const notif = new Notification({
+      title: String(title || 'LimiAI'),
+      body: String(body || '')
+    });
+    notif.show();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
 
 app.on('will-quit', () => {
   try { mcp.disconnectAll(); } catch (_) { }
+  // OmniRoute, поднятый самим приложением, останавливаем при закрытии LimiAI.
+  // `omniroute stop` запускаем отвязанным процессом (detached), чтобы он пережил
+  // выход приложения и успел выполниться. Если OmniRoute запущен вручную
+  // (флаг omniStartedByApp = false) — не трогаем.
+  if (omniStartedByApp) {
+    try {
+      stopOmnirouteForced();
+    } catch (e) {
+      console.error('OmniRoute stop on quit failed:', e.message);
+    }
+  }
 });
-
 /* ---------- fsx helpers for renderer (direct calls, no agent) ---------- */
 
 ipcMain.handle('fsx:read', async (_e, { workspaceId, relPath }) => {
@@ -537,6 +1165,10 @@ async function requestApproval(sender, sessionId, { workspaceId, tool, params })
   const auto = settings.get().autoApprove;
 
   const isReadOnly = tool === 'read_file' || tool === 'list_dir';
+  // напоминания — безвредные данные приложения, подтверждение не нужно
+  if (tool && tool.startsWith('reminder_')) return { allow: true };
+  // ROLimi: инструменты официального Roblox Studio MCP — без подтверждения
+  if (rolimi.isRoliTool(tool)) return { allow: true };
 
   if (auto === 'all' || (auto === 'read' && isReadOnly)) {
     return { allow: true };
@@ -604,9 +1236,14 @@ async function runAgent(sender, { sessionId, workspaceId, model, messages, chatI
   const hasTools = cfg.agentMode; // инструменты доступны всегда в режиме агента
   const workingDir = (ws && ws.path) || app.getPath('documents'); // без проекта работаем в Документах
 
+  // предзаполняем кэш файлов проекта, чтобы модель сразу видела структуру
+  if (ws && ws.path) primeFileCache(ws.path);
+
   // менеджерский режим: чат-проект (kind=project) руководит работниками и НЕ пишет код сам
   const isManager = role === 'manager';
   const isWorker = role === 'worker';
+  // ROLimi: раздел Roblox Studio — подключаем MCP-инструменты Roblox и Roblox-промт
+  const isRoli = workspaces.isRoli(ws);
 
   const push = (chunk) => {
     if (!sender.isDestroyed()) sender.send('agent:chunk', Object.assign({ sessionId }, chunk));
@@ -641,7 +1278,7 @@ async function runAgent(sender, { sessionId, workspaceId, model, messages, chatI
           baseUrl, apiKey,
           model,
           messages: ctx.messages,
-          tools: hasTools ? await toolSet(cfg, isManager, isWorker) : undefined,
+          tools: hasTools ? await toolSet(cfg, isManager, isWorker, isRoli) : undefined,
           temperature: cfg.temperature,
           maxTokens: cfg.maxTokens,
           topP: cfg.topP,
@@ -955,23 +1592,58 @@ async function executeTool(name, params, wsPath) {
   switch (name) {
     case 'bash':
       return await shell.run(params.command, wsPath);
-    case 'read_file':
-      return JSON.stringify({ content: await fsx.read(wsPath, params.path) });
+    case 'read_file': {
+      const content = await fsx.read(wsPath, params.path);
+      try { filecache.updateFile(wsPath, params.path, content); } catch (_) {}
+      return JSON.stringify({ content });
+    }
     case 'write_file':
       await fsx.write(wsPath, params.path, params.content);
+      try { filecache.updateFile(wsPath, params.path, params.content); } catch (_) {}
+      notifySiteChanged(wsPath, params.path);
       return JSON.stringify({ ok: true, wrote: params.path });
-    case 'edit_file':
+    case 'edit_file': {
       await fsx.edit(wsPath, params.path, params.old_string, params.new_string);
+      try { filecache.updateFile(wsPath, params.path, await fsx.read(wsPath, params.path)); } catch (_) {}
+      notifySiteChanged(wsPath, params.path);
       return JSON.stringify({ ok: true, edited: params.path });
+    }
     case 'delete_file':
       await fsx.remove(wsPath, params.path);
+      try { filecache.invalidate(wsPath, params.path); } catch (_) {}
+      notifySiteChanged(wsPath, params.path);
       return JSON.stringify({ ok: true, deleted: params.path });
-    case 'list_dir':
-      return JSON.stringify({ entries: await fsx.list(wsPath, params.path || '') });
+    case 'list_dir': {
+      const entries = await fsx.list(wsPath, params.path || '');
+      try { filecache.updateTree(wsPath, params.path || '', entries); } catch (_) {}
+      return JSON.stringify({ entries });
+    }
     case 'web_search':
       return await webtools.webSearch(params.query);
     case 'web_fetch':
       return await webtools.webFetch(params.url);
+    case 'reminder_add': {
+      const r = reminders.add({ title: params.title, description: params.description, dueAt: params.dueAt, repeat: params.repeat });
+      broadcastRemindersChange();
+      return JSON.stringify(r.ok ? { ok: true, id: r.reminder.id, title: r.reminder.title, dueAt: r.reminder.dueAt, repeat: r.reminder.repeat } : r);
+    }
+    case 'reminder_list': {
+      const arr = reminders.list();
+      const text = arr.length
+        ? arr.map((r) => `${r.id} | ${r.title}${r.description ? ' — ' + r.description : ''} | ${new Date(r.dueAt).toLocaleString('ru-RU')} | ${r.repeat}`).join('\n')
+        : 'Напоминаний пока нет.';
+      return JSON.stringify({ ok: true, count: arr.length, reminders: arr, text });
+    }
+    case 'reminder_update': {
+      const r = reminders.update(params.id, { title: params.title, description: params.description, dueAt: params.dueAt, repeat: params.repeat });
+      broadcastRemindersChange();
+      return JSON.stringify(r.ok ? { ok: true, reminder: r.reminder } : r);
+    }
+    case 'reminder_delete': {
+      const r = reminders.remove(params.id);
+      broadcastRemindersChange();
+      return JSON.stringify(r.ok ? { ok: true, deleted: params.id } : r);
+    }
     default:
       if (typeof name === 'string' && name.startsWith('mcp__')) {
         return await mcp.call(name, params);
@@ -1023,6 +1695,7 @@ async function runWorker(workspaceId, workerId) {
   broadcastProjectChange(workspaceId, w.managerId);
 
   const ctx = { messages: [], workingDir };
+  const fileCacheText = (() => { try { return filecache.format(workingDir); } catch (_) { return ''; } })();
   const sys = [
     'Ты — работник-исполнитель в составе команды проекта. Ты отвечаешь ТОЛЬКО за свою задачу.',
     'Рабочая папка проекта: ' + workingDir + '. Все пути в инструментах — относительные к ней.',
@@ -1033,6 +1706,11 @@ async function runWorker(workspaceId, workerId) {
     (w.task || '').trim()
   ].join('\n');
   ctx.messages = [{ role: 'system', content: sys }];
+  // кэш файлов — отдельным user-сообщением (не в system): многие провайдеры
+  // перебивают system prompt, и модель тогда не видит структуру проекта
+  if (fileCacheText && fileCacheText.trim()) {
+    ctx.messages.push({ role: 'user', content: 'Справочный контекст проекта (не повторяй list_dir/read_file для того, что здесь уже есть):\n\n' + fileCacheText });
+  }
 
   const controller = new AbortController();
   workerRuns.set(workerId, controller);
