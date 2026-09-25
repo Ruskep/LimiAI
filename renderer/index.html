@@ -2,9 +2,10 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
-  <title>InfinityClaude</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src * data:;" />
+  <title>LimiAI</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="reminders.css" />
   <link rel="icon" type="image/png" href="icon.png" />
 </head>
 <body>
@@ -12,17 +13,30 @@
     <!-- ======= SIDEBAR ======= -->
     <aside id="sidebar">
       <div class="sidebar-brand">
-        <img src="icon.png" alt="InfinityClaude" class="brand-logo" />
-        <span class="brand-name">InfinityClaude</span>
+        <img src="icon.png" alt="LimiAI" class="brand-logo" />
+        <span class="brand-name">LimiAI</span>
       </div>
       <div class="sidebar-top">
         <button id="new-chat-btn" class="new-chat-btn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
           <span data-i18n="newChat">Новый чат</span>
         </button>
+        <button id="rolimi-btn" class="rolimi-btn" title="ROLimi (BETA) — Roblox Studio">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="m1.87 8l.7-2.74a1 1 0 0 1 .96-.76h10.94a1 1 0 0 1 .97 1.24l-.219.875M6 13.5H2A1.5 1.5 0 0 1 .5 12V3.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v1m6.333 11l-6.216-1.677l1.667-6.206L15.5 9.294Zm-1.175-4.569l-1.735-.477l-.464 1.732l1.735.477z" /></svg>
+        </button>
+        <button id="reminders-btn" class="add-ws-btn" title="Запланировано">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
         <button id="add-ws-btn" class="add-ws-btn" title="Добавить папку проекта">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M2.5 12h19M12 2.5v19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
+      </div>
+      <div class="roli-status hidden" id="roli-status">
+        <div class="roli-status-row">
+          <span class="roli-dot" id="roli-dot"></span>
+          <span class="roli-status-text" id="roli-status-text">Roblox Studio</span>
+        </div>
+        <button id="roli-connect-btn" class="roli-connect-btn" data-i18n="roliCheck">Проверить</button>
       </div>
       <div class="sidebar-section" id="sidebar-section">
         <div class="sidebar-section-label" data-i18n="chats">Чаты</div>
@@ -32,16 +46,6 @@
 
 
       <div class="sidebar-bottom">
-        <div class="skills-wrap">
-          <div class="skills-head">
-            <span data-i18n="skills">Скилы</span>
-            <div class="skills-head-btns">
-              <button id="skill-install-btn" class="mini-btn" data-i18n-title="installSkill">↓</button>
-              <button id="skill-add-btn" class="mini-btn" data-i18n-title="createSkill">+</button>
-            </div>
-          </div>
-          <div id="skills-list" class="skills-list"></div>
-        </div>
         <div class="side-actions">
           <button id="settings-btn" class="side-action">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3 1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8 1.6 1.6 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.2a1.6 1.6 0 0 0-1.5 1z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -75,9 +79,9 @@
 
       <div id="messages"><div class="empty-state" id="empty-state">
         <div class="empty-logo">
-          <img src="icon.png" alt="InfinityClaude" />
+          <img src="icon.png" alt="LimiAI" />
         </div>
-        <h1>InfinityClaude</h1>
+        <h1>LimiAI</h1>
         <p data-i18n="emptySub">Агент для проектов через OmniRoute. Добавь папку проекта — я помогу с кодом.</p>
         <div class="empty-actions">
           <button id="empty-add-ws" class="primary-btn" data-i18n="addProjectBtn">Добавить папку проекта</button>
@@ -136,8 +140,8 @@
         <div class="approval-title" id="approval-title"></div>
         <pre class="approval-code" id="approval-code"></pre>
         <div class="approval-opts">
-          <label class="chk"><input type="checkbox" id="approval-remember" /> <span data-i18n="rememberSession">Запомнить на эту сессию</span></label>
-          <label class="chk"><input type="checkbox" id="approval-global" /> <span data-i18n="forAllPaths">Для всех путей</span></label>
+          <label class="chk switch-row"><span data-i18n="rememberSession">Запомнить на эту сессию</span><span class="switch"><input type="checkbox" id="approval-remember" /><i></i></span></label>
+          <label class="chk switch-row"><span data-i18n="forAllPaths">Для всех путей</span><span class="switch"><input type="checkbox" id="approval-global" /><i></i></span></label>
         </div>
       </div>
       <div class="approval-actions">
@@ -161,6 +165,7 @@
           <button class="stab" data-tab="agent" data-i18n="tabAgent">Агент и разрешения</button>
           <button class="stab" data-tab="mcp" data-i18n="tabMcp">MCP-серверы</button>
           <button class="stab" data-tab="ui" data-i18n="tabUi">Интерфейс</button>
+          <button class="stab" data-tab="sounds" data-i18n="tabSounds">Звуки</button>
           <button class="stab" data-tab="skills" data-i18n="tabSkills">Скилы</button>
           <button class="stab" data-tab="updates" data-i18n="tabUpdates">Обновления</button>
           <button class="stab" data-tab="system" data-i18n="tabSystem">Система</button>
@@ -185,6 +190,10 @@
               </div>
             </div>
             <p class="section-note" data-i18n="connNote">Чтобы применить новый шлюз/ключ, сохрани и нажми «Обновить модели» ниже.</p>
+            <label class="chk switch-row">
+              <span data-i18n="omniAutostart">Запускать OmniRoute при запуске</span>
+              <span class="switch"><input type="checkbox" id="cfg-omni-autostart" /><i></i></span>
+            </label>
             <div class="settings-actions">
               <button id="refresh-models-panel" class="btn" data-i18n="refreshModels">Обновить модели</button>
               <button id="test-conn-panel" class="btn" data-i18n="testConnection">Проверить подключение</button>
@@ -235,7 +244,10 @@
                 <label data-i18n="lblContextBudget">Бюджет истории (тыс. символов)</label>
                 <input id="cfg-context" type="number" min="4" max="500" step="1" />
                 <p class="field-hint" data-i18n="hintContextBudget">Старые сообщения за пределом бюджета обрезаются перед отправкой.</p>
-                <label class="chk"><input type="checkbox" id="cfg-compact" /> <span data-i18n="autoCompact">Авто-сжатие контекста на 80% (резюме)</span></label>
+                <label class="chk switch-row">
+                  <span data-i18n="autoCompact">Авто-сжатие контекста на 80% (резюме)</span>
+                  <span class="switch"><input type="checkbox" id="cfg-compact" /><i></i></span>
+                </label>
               </div>
               <div></div>
             </div>
@@ -243,15 +255,24 @@
 
           <div class="spanel" id="spanel-agent">
             <h3 data-i18n="tabAgent">Агент и разрешения</h3>
-            <label class="chk"><input type="checkbox" id="cfg-agent" /> <span data-i18n="agentMode">Агентный режим (инструменты)</span></label>
+            <label class="chk switch-row">
+              <span data-i18n="agentMode">Агентный режим (инструменты)</span>
+              <span class="switch"><input type="checkbox" id="cfg-agent" /><i></i></span>
+            </label>
             <label data-i18n="lblAutoApprove">Авто-одобрение</label>
             <select id="cfg-approve">
               <option value="ask" data-i18n="autoApprove.ask"></option>
               <option value="read" data-i18n="autoApprove.read"></option>
               <option value="all" data-i18n="autoApprove.all"></option>
             </select>
-            <label class="chk"><input type="checkbox" id="cfg-webtools" /> <span data-i18n="webAccess">Веб-доступ (поиск и чтение страниц)</span></label>
-            <label class="chk"><input type="checkbox" id="cfg-loopguard" /> <span data-i18n="loopGuard">Защита от зацикливания модели</span></label>
+            <label class="chk switch-row">
+              <span data-i18n="webAccess">Веб-доступ (поиск и чтение страниц)</span>
+              <span class="switch"><input type="checkbox" id="cfg-webtools" /><i></i></span>
+            </label>
+            <label class="chk switch-row">
+              <span data-i18n="loopGuard">Защита от зацикливания модели</span>
+              <span class="switch"><input type="checkbox" id="cfg-loopguard" /><i></i></span>
+            </label>
             <div class="row2">
               <div>
                 <label data-i18n="lblMaxRounds">Max раундов инструментов за ответ</label>
@@ -322,8 +343,14 @@
                 </select>
               </div>
             </div>
-            <label class="chk"><input type="checkbox" id="cfg-animations" /> <span data-i18n="smoothAnimations">Плавные анимации</span></label>
-            <label class="chk"><input type="checkbox" id="cfg-autoscroll" /> <span data-i18n="autoScroll">Автопрокрутка к новым сообщениям</span></label>
+            <label class="chk switch-row">
+              <span data-i18n="smoothAnimations">Плавные анимации</span>
+              <span class="switch"><input type="checkbox" id="cfg-animations" /><i></i></span>
+            </label>
+            <label class="chk switch-row">
+              <span data-i18n="autoScroll">Автопрокрутка к новым сообщениям</span>
+              <span class="switch"><input type="checkbox" id="cfg-autoscroll" /><i></i></span>
+            </label>
             <div class="row2">
               <div>
                 <label data-i18n="lblRadius">Скругление интерфейса</label>
@@ -336,10 +363,59 @@
                 <span id="cfg-msgwidth-val" class="val"></span>
               </div>
             </div>
-            <label class="chk"><input type="checkbox" id="cfg-codewrap" /> <span data-i18n="codeWrapOn">Перенос длинных строк в коде</span></label>
-            <label class="chk"><input type="checkbox" id="cfg-showtokens" /> <span data-i18n="showTokensOn">Показывать расход токенов после ответа</span></label>
-            <label class="chk"><input type="checkbox" id="cfg-enter" /> <span data-i18n="useEnter">Enter отправляет (снять = Ctrl+Enter)</span></label>
-            <label class="chk"><input type="checkbox" id="cfg-confirmdel" /> <span data-i18n="confirmDelete">Спрашивать подтверждение перед удалением</span></label>
+            <label class="chk switch-row">
+              <span data-i18n="codeWrapOn">Перенос длинных строк в коде</span>
+              <span class="switch"><input type="checkbox" id="cfg-codewrap" /><i></i></span>
+            </label>
+            <label class="chk switch-row">
+              <span data-i18n="showTokensOn">Показывать расход токенов после ответа</span>
+              <span class="switch"><input type="checkbox" id="cfg-showtokens" /><i></i></span>
+            </label>
+            <label class="chk switch-row">
+              <span data-i18n="useEnter">Enter отправляет (снять = Ctrl+Enter)</span>
+              <span class="switch"><input type="checkbox" id="cfg-enter" /><i></i></span>
+            </label>
+            <label class="chk switch-row">
+              <span data-i18n="confirmDelete">Спрашивать подтверждение перед удалением</span>
+              <span class="switch"><input type="checkbox" id="cfg-confirmdel" /><i></i></span>
+            </label>
+          </div>
+
+          <div class="spanel" id="spanel-sounds">
+            <h3 data-i18n="tabSounds">Звуки</h3>
+            <p class="section-note" data-i18n="soundsNote">Выбери звук для каждого события. «Выкл» — без звука.</p>
+            <label data-i18n="sndSend">Отправка сообщения</label>
+            <select id="cfg-snd-send">
+              <option value="">Выкл</option>
+              <option value="send1.mp3">send1</option>
+              <option value="send2.mp3">send2</option>
+              <option value="send3.mp3">send3</option>
+            </select>
+            <label data-i18n="sndEnd">Завершение работы</label>
+            <select id="cfg-snd-end">
+              <option value="">Выкл</option>
+              <option value="end1.mp3">end1</option>
+              <option value="end2.mp3">end2</option>
+              <option value="end3.mp3">end3</option>
+            </select>
+            <label data-i18n="sndPermission">Запрос разрешения</label>
+            <select id="cfg-snd-permission">
+              <option value="">Выкл</option>
+              <option value="permission1.mp3">permission1</option>
+              <option value="permission2.mp3">permission2</option>
+              <option value="permission3.mp3">permission3</option>
+            </select>
+            <label data-i18n="sndClick">Клик по кнопкам</label>
+            <select id="cfg-snd-click">
+              <option value="">Выкл</option>
+              <option value="click1.mp3">click1</option>
+              <option value="click2.mp3">click2</option>
+              <option value="click3.mp3">click3</option>
+            </select>
+            <label class="chk switch-row">
+              <span data-i18n="sndSysNotify">Уведомления Windows (задача окончена, запрос разрешения)</span>
+              <span class="switch"><input type="checkbox" id="cfg-snd-sysnotify" /><i></i></span>
+            </label>
           </div>
 
           <div class="spanel" id="spanel-skills">
@@ -385,7 +461,10 @@
                 <input id="cfg-publicname" type="text" spellcheck="false" />
               </div>
             </div>
-            <label class="chk"><input type="checkbox" id="cfg-identity" /> <span data-i18n="identityOverride">Настаивать на личности Claude (identity override)</span></label>
+            <label class="chk switch-row">
+              <span data-i18n="identityOverride">Настаивать на личности Limi (identity override)</span>
+              <span class="switch"><input type="checkbox" id="cfg-identity" /><i></i></span>
+            </label>
             <div class="row2">
               <div>
                 <label data-i18n="lblTextAttach">Текстовое вложение (КБ)</label>
@@ -393,13 +472,19 @@
               </div>
               <div>
                 <label>&nbsp;</label>
-                <label class="chk"><input type="checkbox" id="cfg-restore" /> <span data-i18n="restoreLastChat">Восстанавливать последний чат</span></label>
+                <label class="chk switch-row">
+                  <span data-i18n="restoreLastChat">Восстанавливать последний чат</span>
+                  <span class="switch"><input type="checkbox" id="cfg-restore" /><i></i></span>
+                </label>
               </div>
             </div>
-            <label class="chk"><input type="checkbox" id="cfg-autotitle" /> <span data-i18n="autoTitle">Авто-заголовок чата из первого сообщения</span></label>
+            <label class="chk switch-row">
+              <span data-i18n="autoTitle">Авто-заголовок чата из первого сообщения</span>
+              <span class="switch"><input type="checkbox" id="cfg-autotitle" /><i></i></span>
+            </label>
             <label data-i18n="lblSystemPrompt">System prompt</label>
             <textarea id="cfg-sysprompt" rows="9" spellcheck="false"></textarea>
-            <p class="section-note" data-i18n="sysPromptNote">Инструкция для модели. Здесь задаётся личность Claude; Kiro-провайдер может перебивать её — используй модель auto (роутинг).</p>
+            <p class="section-note" data-i18n="sysPromptNote">Инструкция для модели. Здесь задаётся личность Limi; Kiro-провайдер может перебивать её — используй модель auto (роутинг).</p>
             <div class="settings-actions">
               <button id="reset-settings-panel" class="btn danger" data-i18n="confirmResetBtn">Сбросить все настройки</button>
             </div>
@@ -491,7 +576,7 @@
         <div id="ob-boot" class="ob-boot">
           <div class="ob-boot-logo">
             <div class="ob-boot-rings"><i></i><i></i><i></i></div>
-            <img src="icon.png" alt="InfinityClaude" draggable="false" />
+            <img src="icon.png" alt="LimiAI" draggable="false" />
           </div>
           <div class="ob-boot-lines">
             <div class="ob-boot-line"><span class="ob-boot-prompt">❯</span><span class="ob-boot-txt" data-i18n="bootKernel">Запускаю ядро</span><span class="ob-boot-dot"></span></div>
@@ -506,9 +591,9 @@
 
         <div id="ob-hero" class="ob-hero hidden">
           <div class="ob-logo">
-            <img src="icon.png" alt="InfinityClaude" draggable="false" />
+            <img src="icon.png" alt="LimiAI" draggable="false" />
           </div>
-          <h1 class="ob-title"><span class="ob-name">Infinity</span><span class="ob-name ob-name-accent">Claude</span></h1>
+          <h1 class="ob-title"><span class="ob-name">Limi</span><span class="ob-name ob-name-accent">AI</span></h1>
           <p class="ob-sub" data-i18n="obTagline">Твой личный агент с файлами, терминалом и веб-инструментами</p>
           <button id="ob-start" class="btn primary ob-cta" data-i18n="obStart">Начать</button>
         </div>
@@ -537,64 +622,167 @@
         <button id="ob-ai-next" class="btn primary ob-cta" data-i18n="obNext">Далее</button>
       </div>
 
-      <div class="ob-slide ob-slide-2" id="ob-demo-slide">
-        <h2 data-i18n="obDemoTitle">Вот как я работаю</h2>
-        <div class="ob-demo">
-          <div class="ob-demo-row ob-demo-user">
-            <span class="ob-demo-ava">🧑</span>
-            <div class="ob-demo-msg" data-i18n="obDemoUser">Исправь баг в настройках</div>
+      <div class="ob-slide ob-slide-2" id="ob-omni-slide">
+        <div class="ob-step-badge"><span data-i18n="obStep">Шаг</span> 1 <span data-i18n="obOf">из</span> 3</div>
+        <h2 data-i18n="obOmniTitle">Установка OmniRoute</h2>
+        <p class="ob-sub" data-i18n="obOmniHint">OmniRoute — бесплатный шлюз, через который Limi общается с моделями. Установка занимает минуту.</p>
+        <div class="ob-omni" id="ob-omni-box">
+          <div class="ob-omni-status hidden" id="ob-omni-done">
+            <span class="ob-ok-ic">✓</span>
+            <strong data-i18n="obOmniDone">OmniRoute установлен и запущен</strong>
           </div>
-          <div class="ob-demo-row ob-demo-agent">
-            <span class="ob-demo-ava">🤖</span>
-            <div class="ob-demo-msg">
-              <span class="ob-demo-think"><span data-i18n="obDemoThink">Думаю</span><span class="ob-dots"></span></span>
-              <div class="ob-demo-tool"><span data-i18n="obDemoRead">📖 читаю файл настроек</span></div>
-              <div class="ob-demo-tool"><span data-i18n="obDemoEdit">✏️ исправляю ошибку</span></div>
-              <div class="ob-demo-ans" data-i18n="obDemoDone">✅ Готово, ошибка исправлена</div>
+          <div class="ob-omni-actions" id="ob-omni-actions">
+            <button id="ob-omni-install" class="btn primary" data-i18n="obOmniInstall">Установить OmniRoute</button>
+            <button id="ob-omni-open" class="btn" data-i18n="obOmniOpen">Открыть панель</button>
+          </div>
+          <div class="ob-progress hidden" id="ob-omni-progress">
+            <div class="ob-progress-bar"><div class="ob-progress-fill" id="ob-omni-fill"></div></div>
+            <div class="ob-progress-row">
+              <span class="ob-progress-pct" id="ob-omni-pct">0%</span>
+              <span class="ob-progress-msg" id="ob-omni-msg"></span>
+            </div>
+          </div>
+          <div class="ob-omni-err hidden" id="ob-omni-err"></div>
+        </div>
+        <div class="ob-actions">
+          <button id="ob-omni-next" class="btn primary ob-cta" data-i18n="obNext" disabled>Далее</button>
+          <button id="ob-omni-skip" class="btn ob-skip" data-i18n="obSkip">Пропустить</button>
+        </div>
+      </div>
+
+      <div class="ob-slide ob-slide-3" id="ob-provider-slide">
+        <div class="ob-step-badge"><span data-i18n="obStep">Шаг</span> 2 <span data-i18n="obOf">из</span> 3</div>
+        <h2 data-i18n="obProvTitle">Настройка провайдера</h2>
+        <p class="ob-sub" data-i18n="obProvHint">Подключи бесплатного провайдера, чтобы Limi могла отвечать на запросы. Это займёт пару минут.</p>
+        <div class="ob-steps">
+          <div class="ob-step"><span class="ob-step-num">1</span><span data-i18n="obProvStep1">Открой панель OmniRoute. Нажми кнопку «Открыть панель» ниже — откроется <b>http://localhost:20128</b></span></div>
+          <div class="ob-step"><span class="ob-step-num">2</span><span data-i18n="obProvStep2">Нажми «Войти» и создай бесплатный аккаунт OmniRoute (или войди, если он уже есть)</span></div>
+          <div class="ob-step"><span class="ob-step-num">3</span><span data-i18n="obProvStep3">В разделе «Провайдеры» нажми «Добавить» и выбери одного из бесплатных провайдеров (например, <b>Kiro</b> или <b>Cline</b>)</span></div>
+          <div class="ob-step"><span class="ob-step-num">4</span><span data-i18n="obProvStep4">Подключи аккаунт провайдера (обычно это вход через браузер в один клик) — и он появится в списке</span></div>
+          <div class="ob-step"><span class="ob-step-num">5</span><span data-i18n="obProvStep5">Вернись сюда и нажми «Проверить провайдеры». Если модели нашлись — шаг выполнен</span></div>
+        </div>
+        <div class="ob-provider">
+          <div class="ob-provider-btns">
+            <button id="ob-provider-open" class="btn" data-i18n="obProvOpen">Открыть панель OmniRoute</button>
+            <button id="ob-provider-check" class="btn primary" data-i18n="obProvCheck">Проверить провайдеры</button>
+          </div>
+          <div class="ob-provider-status hidden" id="ob-provider-status"></div>
+        </div>
+        <div class="ob-actions">
+          <button id="ob-provider-next" class="btn primary ob-cta" data-i18n="obNext" disabled>Далее</button>
+          <button id="ob-provider-skip" class="btn ob-skip" data-i18n="obSkip">Пропустить</button>
+        </div>
+      </div>
+
+      <div class="ob-slide ob-slide-4" id="ob-autostart-slide">
+        <div class="ob-step-badge"><span data-i18n="obStep">Шаг</span> 3 <span data-i18n="obOf">из</span> 3</div>
+        <h2 data-i18n="obAutoTitle">Автозапуск</h2>
+        <p class="ob-sub" data-i18n="obAutoHint">Запускать OmniRoute при запуске приложения? Он будет работать тихо, в фоне — без отдельного окна.</p>
+        <div class="ob-settings">
+          <div class="ob-group">
+            <div class="ob-cards ob-cards-row">
+              <button class="ob-autostart-card ob-card-active" data-autostart="yes"><strong data-i18n="obAutoYes">Да</strong><span data-i18n="obAutoYesD">OmniRoute стартует сам</span></button>
+              <button class="ob-autostart-card" data-autostart="no"><strong data-i18n="obAutoNo">Нет</strong><span data-i18n="obAutoNoD">Запускать вручную</span></button>
             </div>
           </div>
         </div>
-        <button id="ob-demo-next" class="btn primary ob-cta" data-i18n="obNext">Далее</button>
-      </div>
-
-      <div class="ob-slide ob-slide-3">
-        <h2 data-i18n="obFeaturesTitle">Что умеет твой агент</h2>
-        <div class="ob-feats">
-          <div class="ob-feat"><span class="ob-feat-ic">📄</span><div><strong data-i18n="obFeatFiles">Файлы</strong><span data-i18n="obFeatFilesD">читает и редактирует файлы проекта</span></div></div>
-          <div class="ob-feat"><span class="ob-feat-ic">⌨️</span><div><strong data-i18n="obFeatTerm">Терминал</strong><span data-i18n="obFeatTermD">запускает команды и проверяет результат</span></div></div>
-          <div class="ob-feat"><span class="ob-feat-ic">🌐</span><div><strong data-i18n="obFeatWeb">Веб</strong><span data-i18n="obFeatWebD">ищет информацию в интернете</span></div></div>
-          <div class="ob-feat"><span class="ob-feat-ic">🔌</span><div><strong data-i18n="obFeatMcp">MCP</strong><span data-i18n="obFeatMcpD">подключай внешние инструменты</span></div></div>
-          <div class="ob-feat"><span class="ob-feat-ic">🎯</span><div><strong data-i18n="obFeatSkills">Скилы</strong><span data-i18n="obFeatSkillsD">готовые навыки для частых задач</span></div></div>
-        </div>
-        <button id="ob-feat-next" class="btn primary ob-cta" data-i18n="obNext">Далее</button>
-      </div>
-
-      <div class="ob-slide ob-slide-4">
-        <h2 data-i18n="obSkillsTitle">Установи пару скилов?</h2>
-        <p class="ob-sub" data-i18n="obSkillsHint">Скилы — готовые инструкции для агента. Можешь установить сейчас или пропустить.</p>
         <div class="ob-actions">
-          <button id="ob-skill-install" class="btn primary" data-i18n="obInstallSkills">Установить скилы</button>
-          <button id="ob-finish" class="btn" data-i18n="obSkip">Пропустить</button>
+          <button id="ob-autostart-next" class="btn primary ob-cta" data-i18n="obNext">Далее</button>
+          <button id="ob-autostart-skip" class="btn ob-skip" data-i18n="obSkip">Пропустить</button>
         </div>
       </div>
 
-      <div class="ob-slide ob-slide-5">
-        <div class="ob-done-ic">✨</div>
+      <div class="ob-slide ob-slide-5" id="ob-done-slide">
+        <div class="ob-done-ic">
+          <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+            <path d="M0 0h32v32H0z" fill="none" />
+            <path fill="currentColor" d="M14.417 0c-.568.016-1.125.286-1.594.807q-.389.44-.661.964c-.469.885-.563 1.885-.74 2.854q-.492 2.727-.969 5.453c-.036.214-.125.302-.323.359c-2.359.745-4.719 1.484-7.063 2.25a6.6 6.6 0 0 0-1.484.672c-1.391.885-1.599 2.339-.557 3.615c.464.563 1.057.953 1.714 1.245c1.469.656 2.938 1.302 4.401 1.964c.026.01.047.016.068.026h-.005l1.745.714v.094c-.266 2.708-.521 5.417-.776 8.13c-.052.557-.016 1.104.182 1.641c.422 1.156 1.417 1.526 2.505.932c.495-.271.891-.661 1.25-1.089c1.828-2.167 3.661-4.328 5.484-6.5c.146-.177.271-.198.484-.13c.464.156.927.307 1.391.464h.005c.026.016.057.026.094.042l.193.057c1.661.552 3.573 1.031 5.234 1.583c.536.177.833.219 1.396.13c.417-.063.792-.083 1.104-.313a2.52 2.52 0 0 0 1.318-2.245c-.005-.568-.208-1.083-.469-1.578c-1.094-2.078-2.182-4.151-3.281-6.224c-.104-.198-.099-.323.052-.5c1.839-2.151 3.672-4.313 5.51-6.474c.359-.427.682-.875.87-1.411c.411-1.167-.12-2.094-1.333-2.318a3.7 3.7 0 0 0-1.646.089c-2.635.698-5.266 1.391-7.891 2.094c-.234.063-.349.021-.474-.193a439 439 0 0 0-3.229-5.354a6 6 0 0 0-.87-1.135c-.495-.49-1.068-.729-1.635-.714zm.229 4.938a.8.8 0 0 1 .25.281q1.743 2.89 3.479 5.786c.094.156.182.208.37.156q3.052-.814 6.104-1.62c.49-.13.979-.255 1.474-.385a.6.6 0 0 1-.135.266a2855 2855 0 0 1-5.036 5.917c-.146.177-.161.297-.057.495c1.25 2.406 2.359 4.411 3.333 6.349l-4.927-1.359l-2.156-.719c-.214-.073-.333-.042-.479.13c-1.661 1.984-3.339 3.964-5.01 5.943a.53.53 0 0 1-.24.172c.047-.5.089-1.005.135-1.51c.203-2.099.396-4.193.604-6.292c-.042-.422.156-.536-.432-.724c-1.99-.792-4.458-1.76-6.417-2.542a.74.74 0 0 1 .318-.177q3.593-1.142 7.193-2.276c.167-.052.266-.12.281-.307c.016-.198.068-.396.099-.589l.969-5.453c.094-.516.188-1.026.281-1.542z" />
+          </svg>
+        </div>
         <h2 data-i18n="obDoneTitle">Всё готово!</h2>
-        <p class="ob-sub" data-i18n="obDoneText">Напиши свой первый запрос. Если что — я всегда в чате слева внизу.</p>
-        <button id="ob-enter-app" class="btn primary ob-cta" data-i18n="obEnter">Войти в приложение</button>
+        <p class="ob-sub" data-i18n="obDoneText">LimiAI настроен. Напиши свой первый запрос — Limi уже ждёт.</p>
+        <button id="ob-enter-app" class="btn primary ob-cta" data-i18n="obEnter">Начать работу</button>
       </div>
     </div>
   </div>
 
-  <script src="i18n.js"></script>
-  <script src="renderer.js"></script>
-</body>
-</html>
-        <button id="approval-allow" class="btn primary" data-i18n="allow">Разрешить</button>
+  <!-- ======= REMINDERS MODAL (Запланировано) ======= -->
+  <div id="reminders-modal" class="modal hidden">
+    <div class="modal-content reminders">
+      <div class="modal-header">
+        <h2 data-i18n="remindersTitle">Запланировано</h2>
+        <button id="reminders-close" class="close-btn">✕</button>
+      </div>
+      <div class="reminders-body">
+        <div class="reminders-form" id="reminders-form">
+          <div class="row2">
+            <div>
+              <label data-i18n="reminderTitle">Название</label>
+              <input id="reminder-title" type="text" spellcheck="false" data-i18n-placeholder="reminderTitlePh" placeholder="Например: позвонить клиенту" />
+            </div>
+            <div>
+              <label data-i18n="reminderRepeat">Периодичность</label>
+              <select id="reminder-repeat">
+                <option value="once" data-i18n="reminderOnce">Единоразово</option>
+                <option value="daily" data-i18n="reminderDaily">Ежедневно</option>
+                <option value="weekly" data-i18n="reminderWeekly">Еженедельно</option>
+                <option value="monthly" data-i18n="reminderMonthly">Ежемесячно</option>
+              </select>
+            </div>
+          </div>
+          <label data-i18n="reminderDescription">Описание</label>
+          <textarea id="reminder-desc" rows="2" spellcheck="false" data-i18n-placeholder="reminderDescPh" placeholder="Что нужно сделать (необязательно)"></textarea>
+          <div class="row2">
+            <div>
+              <label data-i18n="reminderWhen">Когда</label>
+              <input id="reminder-when" type="datetime-local" />
+            </div>
+            <div class="reminders-form-actions">
+              <button id="reminder-save" class="btn primary" data-i18n="reminderAdd">Добавить</button>
+              <button id="reminder-cancel-edit" class="btn hidden" data-i18n="cancel">Отмена</button>
+            </div>
+          </div>
+        </div>
+        <div class="reminders-list" id="reminders-list"></div>
+        <div class="reminders-ai">
+          <input id="reminder-ai-text" type="text" spellcheck="false" data-i18n-placeholder="reminderAiPh" placeholder="Попроси Limi создать напоминание словами…" />
+          <button id="reminder-ai-go" class="btn" data-i18n="reminderAiGo">Попросить Limi</button>
+        </div>
       </div>
     </div>
   </div>
+
+  <!-- ======= SITE PREVIEW PANEL ======= -->
+  <div id="site-panel" class="site-panel hidden">
+    <div class="site-panel-header">
+      <div class="site-tabs" role="tablist">
+        <button class="site-tab active" id="site-tab-site" role="tab" data-site-view="site" data-i18n="siteViewSite">Site</button>
+        <button class="site-tab" id="site-tab-code" role="tab" data-site-view="code" data-i18n="siteViewCode">Code</button>
+      </div>
+      <div class="site-panel-actions">
+        <span class="site-panel-file" id="site-panel-file"></span>
+        <button id="site-fullscreen-btn" class="site-panel-btn" data-i18n-title="siteFullscreen">
+          <svg id="site-fs-icon-expand" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 3l-6 6"/><path d="M3 21l6-6"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M21 21l-6-6"/><path d="M3 3l6 6"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          <svg id="site-fs-icon-collapse" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 3l-6 6"/><path d="M3 21l6-6"/><path d="M16 3v3a2 2 0 0 0 2 2h3"/><path d="M8 21v-3a2 2 0 0 0-2-2H3"/><path d="M21 21l-6-6"/><path d="M3 3l6 6"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
+        </button>
+        <button id="site-close-btn" class="site-panel-btn" data-i18n-title="siteClose">✕</button>
+      </div>
+    </div>
+    <div class="site-view" id="site-view-site">
+      <div class="site-loading hidden" id="site-loading"><span class="site-loading-dots"></span></div>
+      <div class="site-load-error hidden" id="site-load-error">
+        <div class="site-load-error-ic">⚠</div>
+        <p data-i18n="siteLoadError">Не удалось загрузить предпросмотр. Обновите страницу или запустите сайт заново.</p>
+        <button id="site-load-error-btn" class="btn" data-i18n="reload">Обновить</button>
+      </div>
+      <iframe id="site-iframe" title="Site preview" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"></iframe>
+    </div>
+    <div class="site-view hidden" id="site-view-code">
+      <div class="site-code-tabs" id="site-code-tabs"></div>
+      <pre class="site-code-pre" id="site-code-pre"><code id="site-code" class="language-html"></code></pre>
+    </div>
+  </div>
+
 
   <!-- ======= POLL MODAL ======= -->
   <div id="poll" class="modal hidden">
@@ -641,9 +829,8 @@
     </div>
   </div>
 
-
-
   <script src="i18n.js"></script>
   <script src="renderer.js"></script>
+  <script src="site-preview.js"></script>
 </body>
 </html>

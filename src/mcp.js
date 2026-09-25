@@ -17,8 +17,15 @@ function loadModules() {
 
 const connections = new Map(); // serverId -> { client, transport, tools, updatedAt }
 
+function expandEnv(s) {
+  return String(s || '')
+    .replace(/%([^%]+)%/g, (_, k) => (process.env[k] != null ? process.env[k] : ''))
+    .replace(/\$\{([^}]+)\}/g, (_, k) => (process.env[k] != null ? process.env[k] : ''));
+}
+
 function serverKey(s) {
-  return (s.id || s.name || '') + '|' + (s.command || '') + '|' + (s.url || '');
+  const args = Array.isArray(s.args) ? s.args.join('\0') : '';
+  return (s.id || s.name || '') + '|' + (s.command || '') + '|' + args + '|' + (s.url || '');
 }
 
 function transportFor(s) {
@@ -28,12 +35,23 @@ function transportFor(s) {
       requestInit: s.headers ? { headers: s.headers } : undefined
     });
   }
-  const command = String(s.command || '').trim();
+  const command = expandEnv(String(s.command || '').trim());
   if (!command) return null;
-  const parts = command.split(/\s+/);
+  let args;
+  if (Array.isArray(s.args) && s.args.length) {
+    args = s.args.map(expandEnv);
+  } else {
+    const parts = command.split(/\s+/);
+    return new stdioMod.StdioClientTransport({
+      command: parts[0],
+      args: parts.slice(1),
+      cwd: s.cwd ? path.resolve(s.cwd) : undefined,
+      env: s.env ? { ...process.env, ...s.env } : undefined
+    });
+  }
   return new stdioMod.StdioClientTransport({
-    command: parts[0],
-    args: parts.slice(1),
+    command,
+    args,
     cwd: s.cwd ? path.resolve(s.cwd) : undefined,
     env: s.env ? { ...process.env, ...s.env } : undefined
   });
@@ -61,9 +79,7 @@ async function connect(server) {
   const key = serverKey(server);
   const existing = connections.get(server.id);
   if (existing && existing.key === key && existing.client) {
-    if (Date.now() - existing.connectedAt < 60000) {
-      return { ok: true, tools: existing.tools };
-    }
+    return { ok: true, tools: existing.tools };
   }
 
   try {
@@ -71,7 +87,7 @@ async function connect(server) {
     if (!transport) return { ok: false, error: 'Укажи команду (напр. npx -y @mcp/server-filesystem) или URL сервера' };
 
     const run = new Promise((resolve, reject) => {
-      const client = new clientMod.Client({ name: 'infinity-claude', version: '1.0.0' });
+      const client = new clientMod.Client({ name: 'limiai', version: '1.0.0' });
       const timer = setTimeout(() => { reject(new Error('Таймаут подключения к MCP-серверу (20с)')); }, 20000);
       client.connect(transport)
         .then(() => clearTimeout(timer))
@@ -173,11 +189,12 @@ function disconnectAll() {
 
 /**
  * Тест подключения: подключается и возвращает количество найденных инструментов.
+ * keepAlive=true — оставить соединение (для ROLimi: статус и последующие вызовы).
  */
-async function test(server) {
+async function test(server, opts) {
   const res = await connect(server);
   if (!res.ok) return { ok: false, error: res.error };
-  disconnect(server.id);
+  if (!(opts && opts.keepAlive)) disconnect(server.id);
   return { ok: true, tools: (res.tools || []).length };
 }
 
