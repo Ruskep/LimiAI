@@ -3023,7 +3023,10 @@ function setupUpdates() {
         statusEl.textContent = statusEl.textContent.replace('{v}', (st && st.version) || '');
       }
       if (status === 'error') {
-        statusEl.textContent = (st && st.message) ? i18nT('updError') + ': ' + st.message : i18nT('updError');
+        const msg = (st && st.message === 'REPO_CLOSED')
+          ? i18nT('updRepoClosed')
+          : (st && st.message ? st.message : '');
+        statusEl.textContent = msg ? i18nT('updError') + ': ' + msg : i18nT('updError');
       }
     }
     if (progressEl) {

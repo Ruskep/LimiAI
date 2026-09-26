@@ -337,12 +337,18 @@ function broadcastUpdateStatus(status, extra) {
 function setupAutoUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.setFeedURL({ provider: 'github', owner: 'Ruskep', repo: 'infinity-claude' });
+  autoUpdater.setFeedURL({ provider: 'github', owner: 'Ruskep', repo: 'LimiAI' });
 
   autoUpdater.on('checking-for-update', () => broadcastUpdateStatus('checking'));
   autoUpdater.on('update-available', (info) => broadcastUpdateStatus('available', { version: info.version }));
   autoUpdater.on('update-not-available', () => broadcastUpdateStatus('uptodate'));
-  autoUpdater.on('error', (err) => broadcastUpdateStatus('error', { message: String(err && err.message || err) }));
+  autoUpdater.on('error', (err) => {
+    const raw = String(err && err.message || err);
+    // GitHub отдаёт 404 на releases.atom для приватных/несуществующих репозиториев.
+    // Вместо простыни хедеров показываем понятное сообщение (рендерер переводит маркер REPO_CLOSED).
+    const isRepoClosed = /404/.test(raw) && /releases\.atom/.test(raw);
+    broadcastUpdateStatus('error', { message: isRepoClosed ? 'REPO_CLOSED' : raw });
+  });
   autoUpdater.on('download-progress', (p) => broadcastUpdateStatus('downloading', { progress: p.percent || 0 }));
   autoUpdater.on('update-downloaded', (info) => {
     updateState = Object.assign({}, updateState, { status: 'downloaded', version: info.version, progress: 100 });
